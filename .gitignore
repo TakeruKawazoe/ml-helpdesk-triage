@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# Local environment files
+.env
+.env.*
+
+# Generated artifacts
+models/
+reports/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.vscode/
