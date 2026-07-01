@@ -240,8 +240,11 @@ def train_target(data: pd.DataFrame, target_name: str, target_column: str) -> di
     label_encoder = LabelEncoder().fit(train_data[target_column].tolist())
     y_train = label_encoder.transform(train_data[target_column].tolist())
 
+    if label_encoder.classes_ is None:
+        raise RuntimeError("Label encoder is not fitted.")
+
     model = SoftmaxLogisticRegression()
-    model.fit(x_train, y_train, class_count=len(label_encoder.classes_ or []))
+    model.fit(x_train, y_train, class_count=len(label_encoder.classes_))
     save_model_artifacts(target_name, target_column, vectorizer, label_encoder, model)
 
     predicted_indexes = model.predict(x_test)
@@ -254,7 +257,12 @@ def train_target(data: pd.DataFrame, target_name: str, target_column: str) -> di
     report["target_column"] = target_column
     report["train_count"] = len(train_data)
     report["test_count"] = len(test_data)
-    report["vocab_size"] = len(vectorizer.vocab_ or {})
+    if vectorizer.vocab_ is None:
+        raise RuntimeError("Vectorizer is not fitted.")
+    report["vocab_size"] = len(vectorizer.vocab_)
+    if target_name == "priority":
+        priority_classes = report["classes"]
+        report["high_recall"] = priority_classes["High"]["recall"]
 
     write_json(REPORT_DIR / f"{target_name}_metrics.json", report)
     write_csv(REPORT_DIR / f"{target_name}_confusion_matrix.csv", confusion_matrix_rows(y_true, y_pred))
@@ -341,6 +349,9 @@ def main() -> None:
             "target_column": report["target_column"],
             "accuracy": round(float(report["accuracy"]), 4),
             "macro_f1": round(float(report["macro_f1"]), 4),
+            "high_recall": round(float(report["high_recall"]), 4)
+            if report["target"] == "priority"
+            else "",
             "train_count": report["train_count"],
             "test_count": report["test_count"],
             "vocab_size": report["vocab_size"],
@@ -350,13 +361,20 @@ def main() -> None:
     write_csv(REPORT_DIR / "summary.csv", summary_rows)
 
     for row in summary_rows:
-        print(
+        output_parts = [
             f"{row['target']}: "
-            f"accuracy={row['accuracy']} "
-            f"macro_f1={row['macro_f1']} "
-            f"train={row['train_count']} "
-            f"test={row['test_count']}"
+            f"accuracy={row['accuracy']}",
+            f"macro_f1={row['macro_f1']}",
+        ]
+        if row["target"] == "priority":
+            output_parts.append(f"high_recall={row['high_recall']}")
+        output_parts.extend(
+            [
+                f"train={row['train_count']}",
+                f"test={row['test_count']}",
+            ]
         )
+        print(" ".join(output_parts))
 
 
 if __name__ == "__main__":
