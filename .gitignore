@@ -13,6 +13,7 @@ venv/
 # Generated artifacts
 models/
 reports/
+storage/
 
 # Editor and OS files
 .DS_Store
