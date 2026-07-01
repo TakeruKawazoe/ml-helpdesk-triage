@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ML Helpdesk Triage</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">Supervised ML</p>
+          <h1>業務問い合わせトリアージ</h1>
+        </div>
+        <div class="status-pill" id="statusPill">Ready</div>
+      </header>
+
+      <section class="workspace" aria-label="問い合わせ予測">
+        <form class="input-panel" id="predictForm">
+          <div class="field-group">
+            <label for="ticketText">問い合わせ文</label>
+            <textarea id="ticketText" name="text" rows="8" required>出勤打刻が全社で利用できず業務が止まっています</textarea>
+          </div>
+
+          <div class="control-grid">
+            <div class="field-group">
+              <label for="impactScope">影響範囲</label>
+              <select id="impactScope" name="impact_scope">
+                <option value="個人">個人</option>
+                <option value="部署">部署</option>
+                <option value="複数部署">複数部署</option>
+                <option value="全社" selected>全社</option>
+              </select>
+            </div>
+
+            <div class="field-group">
+              <label for="requesterRole">依頼者</label>
+              <select id="requesterRole" name="requester_role">
+                <option value="社員">社員</option>
+                <option value="管理者" selected>管理者</option>
+                <option value="経理担当">経理担当</option>
+                <option value="開発者">開発者</option>
+              </select>
+            </div>
+
+            <div class="field-group">
+              <label for="channel">経路</label>
+              <select id="channel" name="channel">
+                <option value="Slack" selected>Slack</option>
+                <option value="問い合わせフォーム">問い合わせフォーム</option>
+                <option value="メール">メール</option>
+                <option value="電話">電話</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="button-row">
+            <button type="submit" id="submitButton">予測する</button>
+            <button type="button" class="secondary-button" id="sampleButton">サンプル</button>
+          </div>
+        </form>
+
+        <section class="result-panel" aria-live="polite">
+          <div class="result-header">
+            <p class="eyebrow">Prediction</p>
+            <h2>判定結果</h2>
+          </div>
+
+          <div class="result-grid" id="resultGrid">
+            <article class="empty-state">
+              <strong>未実行</strong>
+              <span>Waiting</span>
+            </article>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
