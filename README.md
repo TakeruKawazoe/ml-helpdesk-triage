@@ -99,6 +99,12 @@ $env:NOTION_DATABASE_ID="3a5d3d7e828c80d59124c41c212013e9"
 python src/web_app.py
 ```
 
+Windowsのユーザー環境変数へ上記2項目を保存済みの場合は、次のコマンドで起動できます。
+
+```powershell
+.\run_web_app.ps1
+```
+
 データベースに複数のデータソースが存在する場合だけ、`NOTION_DATA_SOURCE_ID` も設定します。環境変数が未設定の場合はNotion連携を無効として明示し、予測とローカル履歴保存は継続します。APIエラーの場合もローカル履歴を保持し、画面と履歴に同期失敗を表示します。
 
 - [Notion APIの認証設定](https://developers.notion.com/guides/get-started/authorization)
