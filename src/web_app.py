@@ -10,6 +10,13 @@ from pathlib import Path
 from threading import RLock
 from urllib.parse import parse_qs, unquote, urlparse
 
+from notion_sync import (
+    NotionConfigurationError,
+    NotionSyncError,
+    NotionSyncResult,
+    sync_feedback_to_notion,
+    sync_prediction_to_notion,
+)
 from predict import (
     CHANNEL_CHOICES,
     IMPACT_SCOPE_CHOICES,
@@ -59,11 +66,18 @@ HISTORY_FIELDS = [
     "predicted_category",
     "predicted_priority",
     "predicted_department",
+    "category_confidence",
+    "priority_confidence",
+    "department_confidence",
     "corrected_category",
     "corrected_priority",
     "corrected_department",
     "note",
     "feedback_saved_at",
+    "notion_page_id",
+    "notion_sync_status",
+    "notion_sync_error",
+    "notion_synced_at",
 ]
 TARGET_TO_PREDICTED_FIELD = {
     "category": "predicted_category",
@@ -104,7 +118,17 @@ class HelpdeskTriageHandler(BaseHTTPRequestHandler):
             payload = self.read_json_body()
             self.validate_feedback_payload(payload)
             updated_record = save_feedback(payload)
-            self.write_json({"item": updated_record}, HTTPStatus.OK)
+            notion_result = attempt_feedback_sync(updated_record)
+            updated_record = save_notion_sync_result(
+                updated_record["prediction_id"], notion_result
+            )
+            self.write_json(
+                {
+                    "item": updated_record,
+                    "notion_sync": notion_result.__dict__,
+                },
+                HTTPStatus.OK,
+            )
             return
 
         if self.path != "/api/predict":
@@ -124,11 +148,16 @@ class HelpdeskTriageHandler(BaseHTTPRequestHandler):
             for target in TARGETS
         ]
         history_record = save_prediction(payload, results)
+        notion_result = attempt_prediction_sync(history_record)
+        history_record = save_notion_sync_result(
+            history_record["prediction_id"], notion_result
+        )
         self.write_json(
             {
                 "prediction_id": history_record["prediction_id"],
                 "input": payload,
                 "predictions": [result.__dict__ for result in results],
+                "notion_sync": notion_result.__dict__,
             },
             HTTPStatus.OK,
         )
@@ -244,6 +273,10 @@ def save_prediction(payload: dict[str, str], results: list[object]) -> dict[str,
             TARGET_TO_PREDICTED_FIELD[result.target]: result.label
             for result in results
         }
+        confidence_map = {
+            f"{result.target}_confidence": f"{result.confidence:.6f}"
+            for result in results
+        }
         record = {
             "prediction_id": str(uuid.uuid4()),
             "created_at": current_timestamp(),
@@ -254,11 +287,18 @@ def save_prediction(payload: dict[str, str], results: list[object]) -> dict[str,
             "predicted_category": prediction_map["predicted_category"],
             "predicted_priority": prediction_map["predicted_priority"],
             "predicted_department": prediction_map["predicted_department"],
+            "category_confidence": confidence_map["category_confidence"],
+            "priority_confidence": confidence_map["priority_confidence"],
+            "department_confidence": confidence_map["department_confidence"],
             "corrected_category": "",
             "corrected_priority": "",
             "corrected_department": "",
             "note": "",
             "feedback_saved_at": "",
+            "notion_page_id": "",
+            "notion_sync_status": "",
+            "notion_sync_error": "",
+            "notion_synced_at": "",
         }
         append_history_record(record)
         return record
@@ -288,12 +328,68 @@ def save_feedback(payload: dict[str, str]) -> dict[str, str]:
         return updated_record
 
 
+def attempt_prediction_sync(record: dict[str, str]) -> NotionSyncResult:
+    try:
+        return sync_prediction_to_notion(record)
+    except (NotionConfigurationError, NotionSyncError) as error:
+        return NotionSyncResult(status="failed", error=str(error))
+
+
+def attempt_feedback_sync(record: dict[str, str]) -> NotionSyncResult:
+    try:
+        return sync_feedback_to_notion(record)
+    except (NotionConfigurationError, NotionSyncError) as error:
+        return NotionSyncResult(
+            status="failed",
+            page_id=record["notion_page_id"],
+            error=str(error),
+        )
+
+
+def save_notion_sync_result(
+    prediction_id: str,
+    result: NotionSyncResult,
+) -> dict[str, str]:
+    with HISTORY_LOCK:
+        ensure_history_file()
+        with FEEDBACK_PATH.open("r", encoding="utf-8-sig", newline="") as csv_file:
+            rows = list(csv.DictReader(csv_file))
+
+        updated_record: dict[str, str] | None = None
+        for row in rows:
+            if row["prediction_id"] == prediction_id:
+                if result.page_id:
+                    row["notion_page_id"] = result.page_id
+                row["notion_sync_status"] = result.status
+                row["notion_sync_error"] = result.error
+                if result.status == "synced":
+                    row["notion_synced_at"] = current_timestamp()
+                updated_record = row
+                break
+
+        if updated_record is None:
+            raise ValueError(f"prediction_id not found: {prediction_id}")
+
+        write_history(rows)
+        return updated_record
+
+
 def ensure_history_file() -> None:
     with HISTORY_LOCK:
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
         if FEEDBACK_PATH.exists():
+            migrate_history_schema()
             return
         write_history([])
+
+
+def migrate_history_schema() -> None:
+    with FEEDBACK_PATH.open("r", encoding="utf-8-sig", newline="") as csv_file:
+        reader = csv.DictReader(csv_file)
+        rows = list(reader)
+        if reader.fieldnames == HISTORY_FIELDS:
+            return
+    write_history(rows)
 
 
 def append_history_record(record: dict[str, str]) -> None:
@@ -309,7 +405,10 @@ def write_history(rows: list[dict[str, str]]) -> None:
         with FEEDBACK_PATH.open("w", encoding="utf-8-sig", newline="") as csv_file:
             writer = csv.DictWriter(csv_file, fieldnames=HISTORY_FIELDS)
             writer.writeheader()
-            writer.writerows(rows)
+            writer.writerows(
+                {field: row.get(field, "") for field in HISTORY_FIELDS}
+                for row in rows
+            )
 
 
 def current_timestamp() -> str:

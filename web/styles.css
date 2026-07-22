@@ -273,6 +273,34 @@ button:disabled {
   padding: 16px;
 }
 
+.notion-sync-banner {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.notion-sync-banner.is-synced {
+  border-color: #9ed3ae;
+  background: #edf8f0;
+  color: var(--success);
+}
+
+.notion-sync-banner.is-failed,
+.notion-sync-banner.is-not_linked {
+  border-color: #efaaa4;
+  background: #fff3f2;
+  color: var(--danger);
+}
+
+.notion-sync-banner span {
+  overflow-wrap: anywhere;
+}
+
 .feedback-card {
   display: grid;
   gap: 14px;

@@ -113,7 +113,7 @@ async function predict(payload) {
       throw new Error(body.error);
     }
 
-    renderPredictions(body.predictions, body.prediction_id);
+    renderPredictions(body.predictions, body.prediction_id, body.notion_sync);
     await loadHistory();
     setStatus("Done", "is-done");
   } catch (error) {
@@ -151,6 +151,7 @@ async function saveFeedback(predictionId, formElement) {
       throw new Error(body.error);
     }
     formElement.dataset.saved = "true";
+    updateNotionSyncBanner(body.notion_sync);
     await loadHistory();
     setStatus("Saved", "is-done");
   } catch (error) {
@@ -171,7 +172,7 @@ async function loadHistory() {
   renderHistory(body.items);
 }
 
-function renderPredictions(predictions, predictionId) {
+function renderPredictions(predictions, predictionId, notionSync) {
   if (!predictionId) {
     throw new Error("prediction_id is empty.");
   }
@@ -181,8 +182,44 @@ function renderPredictions(predictions, predictionId) {
 
   resultGrid.replaceChildren(
     ...predictions.map((prediction) => createPredictionCard(prediction)),
+    createNotionSyncBanner(notionSync),
     createFeedbackForm(predictions, predictionId),
   );
+}
+
+function createNotionSyncBanner(notionSync) {
+  const banner = document.createElement("div");
+  banner.className = "notion-sync-banner";
+
+  const status = notionSync?.status || "disabled";
+  const messages = {
+    synced: "Notionに登録しました",
+    disabled: "Notion連携は未設定です",
+    failed: "Notionへの登録に失敗しました",
+    not_linked: "この履歴に対応するNotion行がありません",
+  };
+  banner.classList.add(`is-${status}`);
+
+  const title = document.createElement("strong");
+  title.textContent = messages[status] || `Notion連携: ${status}`;
+  banner.append(title);
+
+  if (notionSync?.error) {
+    const detail = document.createElement("span");
+    detail.textContent = notionSync.error;
+    banner.append(detail);
+  }
+  return banner;
+}
+
+function updateNotionSyncBanner(notionSync) {
+  const currentBanner = resultGrid.querySelector(".notion-sync-banner");
+  const nextBanner = createNotionSyncBanner(notionSync);
+  if (currentBanner) {
+    currentBanner.replaceWith(nextBanner);
+    return;
+  }
+  resultGrid.prepend(nextBanner);
 }
 
 function createPredictionCard(prediction) {
@@ -352,6 +389,9 @@ function createHistoryCard(item) {
     createBadge(`依頼者: ${item.requester_role}`),
     createBadge(`経路: ${item.channel}`),
   );
+  if (item.notion_sync_status) {
+    meta.append(createBadge(notionHistoryLabel(item.notion_sync_status)));
+  }
 
   const predicted = document.createElement("div");
   predicted.className = "history-labels";
@@ -386,6 +426,16 @@ function createHistoryCard(item) {
   }
 
   return card;
+}
+
+function notionHistoryLabel(status) {
+  const labels = {
+    synced: "Notion: 同期済み",
+    disabled: "Notion: 未設定",
+    failed: "Notion: 同期失敗",
+    not_linked: "Notion: 未連携",
+  };
+  return labels[status] || `Notion: ${status}`;
 }
 
 function createBadge(text) {

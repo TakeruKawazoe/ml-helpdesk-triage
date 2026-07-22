@@ -81,6 +81,29 @@ http://127.0.0.1:8000
 
 Web画面では、問い合わせ文、影響範囲、依頼者、経路を入力して、カテゴリ・優先度・担当部署を確認できます。
 
+## Notion連携
+
+予測結果をNotionのデータベースへ自動登録し、修正フィードバックを同じ行へ反映できます。連携先データベースに不足している列は、初回同期時に自動で追加されます。
+
+NotionのDeveloper Portalで内部インテグレーションを作成し、以下の権限を有効にしてください。
+
+- Read content
+- Insert content
+- Update content
+
+次に、連携先データベースのメニューからインテグレーションを追加します。トークンはソースコードやGitへ保存せず、Webアプリを起動するPowerShellで環境変数へ設定してください。
+
+```powershell
+$env:NOTION_API_TOKEN="Notionのインテグレーショントークン"
+$env:NOTION_DATABASE_ID="3a5d3d7e828c80d59124c41c212013e9"
+python src/web_app.py
+```
+
+データベースに複数のデータソースが存在する場合だけ、`NOTION_DATA_SOURCE_ID` も設定します。環境変数が未設定の場合はNotion連携を無効として明示し、予測とローカル履歴保存は継続します。APIエラーの場合もローカル履歴を保持し、画面と履歴に同期失敗を表示します。
+
+- [Notion APIの認証設定](https://developers.notion.com/guides/get-started/authorization)
+- [Notion APIでページを作成する](https://developers.notion.com/reference/post-page)
+
 ## 履歴と修正フィードバック
 
 Web画面から予測すると、予測内容は `storage/prediction_feedback.csv` に保存されます。
@@ -100,10 +123,10 @@ Web画面から予測すると、予測内容は `storage/prediction_feedback.cs
 
 ## テスト
 
-履歴保存と修正フィードバックの回帰テストは以下で実行できます。
+履歴保存、修正フィードバック、Notion連携の回帰テストは以下で実行できます。
 
 ```bash
-python -m unittest tests.test_web_history
+python -m unittest discover -s tests
 ```
 
 ## CLIで使う方法

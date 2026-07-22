@@ -39,9 +39,9 @@ class WebHistoryTest(unittest.TestCase):
                 "channel": "問い合わせフォーム",
             },
             [
-                SimpleNamespace(target="category", label="ネットワーク"),
-                SimpleNamespace(target="priority", label="Middle"),
-                SimpleNamespace(target="department", label="インフラ"),
+                SimpleNamespace(target="category", label="ネットワーク", confidence=0.8),
+                SimpleNamespace(target="priority", label="Middle", confidence=0.7),
+                SimpleNamespace(target="department", label="インフラ", confidence=0.9),
             ],
         )
 
@@ -63,6 +63,7 @@ class WebHistoryTest(unittest.TestCase):
         self.assertEqual(history[0]["corrected_department"], "インフラ")
         self.assertEqual(history[0]["note"], "VPN問い合わせとして修正")
         self.assertTrue(history[0]["feedback_saved_at"])
+        self.assertEqual(history[0]["category_confidence"], "0.800000")
 
     def test_feedback_update_preserves_other_history_rows(self) -> None:
         first = web_app.save_prediction(
@@ -73,9 +74,9 @@ class WebHistoryTest(unittest.TestCase):
                 "channel": "メール",
             },
             [
-                SimpleNamespace(target="category", label="請求"),
-                SimpleNamespace(target="priority", label="Middle"),
-                SimpleNamespace(target="department", label="経理"),
+                SimpleNamespace(target="category", label="請求", confidence=0.8),
+                SimpleNamespace(target="priority", label="Middle", confidence=0.7),
+                SimpleNamespace(target="department", label="経理", confidence=0.9),
             ],
         )
         second = web_app.save_prediction(
@@ -86,9 +87,9 @@ class WebHistoryTest(unittest.TestCase):
                 "channel": "メール",
             },
             [
-                SimpleNamespace(target="category", label="データ連携"),
-                SimpleNamespace(target="priority", label="High"),
-                SimpleNamespace(target="department", label="開発"),
+                SimpleNamespace(target="category", label="データ連携", confidence=0.8),
+                SimpleNamespace(target="priority", label="High", confidence=0.7),
+                SimpleNamespace(target="department", label="開発", confidence=0.9),
             ],
         )
 
@@ -104,6 +105,42 @@ class WebHistoryTest(unittest.TestCase):
         history_ids = {row["prediction_id"] for row in web_app.read_history(limit=10)}
 
         self.assertEqual(history_ids, {first["prediction_id"], second["prediction_id"]})
+
+    def test_notion_sync_result_is_saved_to_history(self) -> None:
+        prediction = web_app.save_prediction(
+            {
+                "text": "全社でログインできません",
+                "impact_scope": "全社",
+                "requester_role": "管理者",
+                "channel": "Slack",
+            },
+            [
+                SimpleNamespace(target="category", label="アカウント", confidence=0.8),
+                SimpleNamespace(target="priority", label="High", confidence=0.9),
+                SimpleNamespace(target="department", label="情シス", confidence=0.7),
+            ],
+        )
+
+        updated = web_app.save_notion_sync_result(
+            prediction["prediction_id"],
+            web_app.NotionSyncResult(status="synced", page_id="page-id"),
+        )
+
+        self.assertEqual(updated["notion_page_id"], "page-id")
+        self.assertEqual(updated["notion_sync_status"], "synced")
+        self.assertTrue(updated["notion_synced_at"])
+
+    def test_existing_history_file_is_migrated(self) -> None:
+        web_app.STORAGE_DIR.mkdir(parents=True)
+        web_app.FEEDBACK_PATH.write_text(
+            "prediction_id,created_at,text\nold-id,2026-07-22T10:00:00+09:00,問い合わせ\n",
+            encoding="utf-8-sig",
+        )
+
+        history = web_app.read_history(limit=10)
+
+        self.assertEqual(history[0]["prediction_id"], "old-id")
+        self.assertEqual(history[0]["notion_sync_status"], "")
 
     def test_validate_string_field_rejects_non_string_value(self) -> None:
         with self.assertRaises(ValueError):
