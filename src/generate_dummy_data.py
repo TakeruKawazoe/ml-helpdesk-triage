@@ -195,9 +195,14 @@ def build_training_records() -> list[dict[str, str]]:
             for case_index, issue in enumerate(issues):
                 template_group = f"{spec.category}-{priority}-{case_index:02d}"
                 for variant in range(TRAIN_VARIANTS_PER_CASE):
+                    object_name = (
+                        spec.objects[case_index]
+                        if variant == 0
+                        else spec.holdout_objects[case_index % len(spec.holdout_objects)]
+                    )
                     record = make_record(
                         ticket_id=f"TKT-{ticket_number:04d}",
-                        inquiry_text=render_training_text(spec.objects[case_index], issue, variant),
+                        inquiry_text=render_training_text(object_name, issue, variant),
                         spec=spec,
                         priority=priority,
                         case_index=case_index,
