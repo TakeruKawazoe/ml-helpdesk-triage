@@ -25,6 +25,12 @@ from predict import (
     build_model_text,
     predict_target,
 )
+from slack_notify import (
+    SlackConfigurationError,
+    SlackNotificationError,
+    SlackNotificationResult,
+    notify_prediction,
+)
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -78,6 +84,10 @@ HISTORY_FIELDS = [
     "notion_sync_status",
     "notion_sync_error",
     "notion_synced_at",
+    "slack_notification_status",
+    "slack_notification_error",
+    "slack_message_ts",
+    "slack_notified_at",
 ]
 TARGET_TO_PREDICTED_FIELD = {
     "category": "predicted_category",
@@ -152,12 +162,17 @@ class HelpdeskTriageHandler(BaseHTTPRequestHandler):
         history_record = save_notion_sync_result(
             history_record["prediction_id"], notion_result
         )
+        slack_result = attempt_slack_notification(history_record)
+        history_record = save_slack_notification_result(
+            history_record["prediction_id"], slack_result
+        )
         self.write_json(
             {
                 "prediction_id": history_record["prediction_id"],
                 "input": payload,
                 "predictions": [result.__dict__ for result in results],
                 "notion_sync": notion_result.__dict__,
+                "slack_notification": slack_result.__dict__,
             },
             HTTPStatus.OK,
         )
@@ -299,6 +314,10 @@ def save_prediction(payload: dict[str, str], results: list[object]) -> dict[str,
             "notion_sync_status": "",
             "notion_sync_error": "",
             "notion_synced_at": "",
+            "slack_notification_status": "",
+            "slack_notification_error": "",
+            "slack_message_ts": "",
+            "slack_notified_at": "",
         }
         append_history_record(record)
         return record
@@ -346,6 +365,13 @@ def attempt_feedback_sync(record: dict[str, str]) -> NotionSyncResult:
         )
 
 
+def attempt_slack_notification(record: dict[str, str]) -> SlackNotificationResult:
+    try:
+        return notify_prediction(record)
+    except (SlackConfigurationError, SlackNotificationError) as error:
+        return SlackNotificationResult(status="failed", error=str(error))
+
+
 def save_notion_sync_result(
     prediction_id: str,
     result: NotionSyncResult,
@@ -364,6 +390,33 @@ def save_notion_sync_result(
                 row["notion_sync_error"] = result.error
                 if result.status == "synced":
                     row["notion_synced_at"] = current_timestamp()
+                updated_record = row
+                break
+
+        if updated_record is None:
+            raise ValueError(f"prediction_id not found: {prediction_id}")
+
+        write_history(rows)
+        return updated_record
+
+
+def save_slack_notification_result(
+    prediction_id: str,
+    result: SlackNotificationResult,
+) -> dict[str, str]:
+    with HISTORY_LOCK:
+        ensure_history_file()
+        with FEEDBACK_PATH.open("r", encoding="utf-8-sig", newline="") as csv_file:
+            rows = list(csv.DictReader(csv_file))
+
+        updated_record: dict[str, str] | None = None
+        for row in rows:
+            if row["prediction_id"] == prediction_id:
+                row["slack_notification_status"] = result.status
+                row["slack_notification_error"] = result.error
+                row["slack_message_ts"] = result.message_ts
+                if result.status == "sent":
+                    row["slack_notified_at"] = current_timestamp()
                 updated_record = row
                 break
 

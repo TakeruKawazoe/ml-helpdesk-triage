@@ -113,7 +113,12 @@ async function predict(payload) {
       throw new Error(body.error);
     }
 
-    renderPredictions(body.predictions, body.prediction_id, body.notion_sync);
+    renderPredictions(
+      body.predictions,
+      body.prediction_id,
+      body.notion_sync,
+      body.slack_notification,
+    );
     await loadHistory();
     setStatus("Done", "is-done");
   } catch (error) {
@@ -172,7 +177,7 @@ async function loadHistory() {
   renderHistory(body.items);
 }
 
-function renderPredictions(predictions, predictionId, notionSync) {
+function renderPredictions(predictions, predictionId, notionSync, slackNotification) {
   if (!predictionId) {
     throw new Error("prediction_id is empty.");
   }
@@ -183,6 +188,7 @@ function renderPredictions(predictions, predictionId, notionSync) {
   resultGrid.replaceChildren(
     ...predictions.map((prediction) => createPredictionCard(prediction)),
     createNotionSyncBanner(notionSync),
+    createSlackNotificationBanner(slackNotification),
     createFeedbackForm(predictions, predictionId),
   );
 }
@@ -220,6 +226,31 @@ function updateNotionSyncBanner(notionSync) {
     return;
   }
   resultGrid.prepend(nextBanner);
+}
+
+function createSlackNotificationBanner(slackNotification) {
+  const banner = document.createElement("div");
+  banner.className = "slack-notification-banner";
+
+  const status = slackNotification?.status || "disabled";
+  const messages = {
+    sent: "Slackへ担当者メンション付きで通知しました",
+    skipped: "優先度LowのためSlack通知対象外です",
+    disabled: "Slack通知は未設定です",
+    failed: "Slack通知に失敗しました",
+  };
+  banner.classList.add(`is-${status}`);
+
+  const title = document.createElement("strong");
+  title.textContent = messages[status] || `Slack通知: ${status}`;
+  banner.append(title);
+
+  if (slackNotification?.error) {
+    const detail = document.createElement("span");
+    detail.textContent = slackNotification.error;
+    banner.append(detail);
+  }
+  return banner;
 }
 
 function createPredictionCard(prediction) {
@@ -392,6 +423,9 @@ function createHistoryCard(item) {
   if (item.notion_sync_status) {
     meta.append(createBadge(notionHistoryLabel(item.notion_sync_status)));
   }
+  if (item.slack_notification_status) {
+    meta.append(createBadge(slackHistoryLabel(item.slack_notification_status)));
+  }
 
   const predicted = document.createElement("div");
   predicted.className = "history-labels";
@@ -436,6 +470,16 @@ function notionHistoryLabel(status) {
     not_linked: "Notion: 未連携",
   };
   return labels[status] || `Notion: ${status}`;
+}
+
+function slackHistoryLabel(status) {
+  const labels = {
+    sent: "Slack: 通知済み",
+    skipped: "Slack: 対象外",
+    disabled: "Slack: 未設定",
+    failed: "Slack: 通知失敗",
+  };
+  return labels[status] || `Slack: ${status}`;
 }
 
 function createBadge(text) {

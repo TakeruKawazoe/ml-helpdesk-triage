@@ -130,6 +130,30 @@ class WebHistoryTest(unittest.TestCase):
         self.assertEqual(updated["notion_sync_status"], "synced")
         self.assertTrue(updated["notion_synced_at"])
 
+    def test_slack_notification_result_is_saved_to_history(self) -> None:
+        prediction = web_app.save_prediction(
+            {
+                "text": "全社でログインできません",
+                "impact_scope": "全社",
+                "requester_role": "管理者",
+                "channel": "Slack",
+            },
+            [
+                SimpleNamespace(target="category", label="アカウント", confidence=0.8),
+                SimpleNamespace(target="priority", label="High", confidence=0.9),
+                SimpleNamespace(target="department", label="情シス", confidence=0.7),
+            ],
+        )
+
+        updated = web_app.save_slack_notification_result(
+            prediction["prediction_id"],
+            web_app.SlackNotificationResult(status="sent", message_ts="123.456"),
+        )
+
+        self.assertEqual(updated["slack_notification_status"], "sent")
+        self.assertEqual(updated["slack_message_ts"], "123.456")
+        self.assertTrue(updated["slack_notified_at"])
+
     def test_existing_history_file_is_migrated(self) -> None:
         web_app.STORAGE_DIR.mkdir(parents=True)
         web_app.FEEDBACK_PATH.write_text(
@@ -141,6 +165,7 @@ class WebHistoryTest(unittest.TestCase):
 
         self.assertEqual(history[0]["prediction_id"], "old-id")
         self.assertEqual(history[0]["notion_sync_status"], "")
+        self.assertEqual(history[0]["slack_notification_status"], "")
 
     def test_validate_string_field_rejects_non_string_value(self) -> None:
         with self.assertRaises(ValueError):

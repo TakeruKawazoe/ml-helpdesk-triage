@@ -273,7 +273,8 @@ button:disabled {
   padding: 16px;
 }
 
-.notion-sync-banner {
+.notion-sync-banner,
+.slack-notification-banner {
   display: grid;
   gap: 3px;
   border: 1px solid var(--border);
@@ -284,20 +285,23 @@ button:disabled {
   font-size: 0.82rem;
 }
 
-.notion-sync-banner.is-synced {
+.notion-sync-banner.is-synced,
+.slack-notification-banner.is-sent {
   border-color: #9ed3ae;
   background: #edf8f0;
   color: var(--success);
 }
 
 .notion-sync-banner.is-failed,
-.notion-sync-banner.is-not_linked {
+.notion-sync-banner.is-not_linked,
+.slack-notification-banner.is-failed {
   border-color: #efaaa4;
   background: #fff3f2;
   color: var(--danger);
 }
 
-.notion-sync-banner span {
+.notion-sync-banner span,
+.slack-notification-banner span {
   overflow-wrap: anywhere;
 }
 
