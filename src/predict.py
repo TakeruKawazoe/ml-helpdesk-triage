@@ -4,6 +4,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 
 import numpy as np
 
@@ -19,6 +20,7 @@ TARGETS = ["category", "priority", "department"]
 IMPACT_SCOPE_CHOICES = ["個人", "部署", "複数部署", "全社"]
 REQUESTER_ROLE_CHOICES = ["社員", "管理者", "経理担当", "開発者"]
 CHANNEL_CHOICES = ["Slack", "問い合わせフォーム", "メール", "電話"]
+MODEL_ACCESS_LOCK = RLock()
 
 
 @dataclass
@@ -44,27 +46,30 @@ def build_model_text(
     return build_text(row)
 
 
-def load_target(target: str) -> tuple[TfidfVectorizer, SoftmaxLogisticRegression, list[str]]:
-    metadata_path = MODEL_DIR / f"{target}_metadata.json"
-    arrays_path = MODEL_DIR / f"{target}_arrays.npz"
-    if not metadata_path.exists() or not arrays_path.exists():
-        raise FileNotFoundError(
-            f"Model artifacts for '{target}' are missing. "
-            "Run src/train_baseline.py before prediction."
-        )
+def load_target(
+    target: str,
+    model_dir: Path = MODEL_DIR,
+) -> tuple[TfidfVectorizer, SoftmaxLogisticRegression, list[str]]:
+    with MODEL_ACCESS_LOCK:
+        metadata_path = model_dir / f"{target}_metadata.json"
+        arrays_path = model_dir / f"{target}_arrays.npz"
+        if not metadata_path.exists() or not arrays_path.exists():
+            raise FileNotFoundError(
+                f"Model artifacts for '{target}' are missing. "
+                "Run src/train_baseline.py before prediction."
+            )
 
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    arrays = np.load(arrays_path)
-
-    vectorizer = TfidfVectorizer(
-        vocab_=metadata["vocab"],
-        idf_=arrays["idf"],
-        min_n=metadata["min_n"],
-        max_n=metadata["max_n"],
-    )
-    model = SoftmaxLogisticRegression(weights_=arrays["weights"])
-    classes = metadata["classes"]
-    return vectorizer, model, classes
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        with np.load(arrays_path) as arrays:
+            vectorizer = TfidfVectorizer(
+                vocab_=metadata["vocab"],
+                idf_=arrays["idf"].copy(),
+                min_n=metadata["min_n"],
+                max_n=metadata["max_n"],
+            )
+            model = SoftmaxLogisticRegression(weights_=arrays["weights"].copy())
+        classes = metadata["classes"]
+        return vectorizer, model, classes
 
 
 def predict_target(target: str, model_text: str, top_k: int) -> PredictionResult:

@@ -289,6 +289,7 @@ def save_model_artifacts(
     vectorizer: TfidfVectorizer,
     label_encoder: LabelEncoder,
     model: SoftmaxLogisticRegression,
+    model_dir: Path = MODEL_DIR,
 ) -> None:
     if vectorizer.vocab_ is None or vectorizer.idf_ is None:
         raise RuntimeError("Vectorizer is not fitted.")
@@ -297,7 +298,7 @@ def save_model_artifacts(
     if model.weights_ is None:
         raise RuntimeError("Model is not fitted.")
 
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    model_dir.mkdir(parents=True, exist_ok=True)
     metadata = {
         "target": target_name,
         "target_column": target_column,
@@ -307,9 +308,9 @@ def save_model_artifacts(
         "vocab": vectorizer.vocab_,
         "classes": label_encoder.classes_,
     }
-    write_json(MODEL_DIR / f"{target_name}_metadata.json", metadata)
+    write_json(model_dir / f"{target_name}_metadata.json", metadata)
     np.savez_compressed(
-        MODEL_DIR / f"{target_name}_arrays.npz",
+        model_dir / f"{target_name}_arrays.npz",
         idf=vectorizer.idf_,
         weights=model.weights_,
     )

@@ -25,6 +25,7 @@ from predict import (
     build_model_text,
     predict_target,
 )
+from retrain_from_feedback import read_status, start_retraining_if_ready
 from slack_notify import (
     SlackConfigurationError,
     SlackNotificationError,
@@ -102,6 +103,10 @@ class HelpdeskTriageHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed_url = urlparse(self.path)
+        if parsed_url.path == "/api/retraining":
+            self.write_json({"retraining": read_status().__dict__}, HTTPStatus.OK)
+            return
+
         if parsed_url.path == "/api/history":
             query = parse_qs(parsed_url.query)
             limit = parse_history_limit(query)
@@ -132,10 +137,12 @@ class HelpdeskTriageHandler(BaseHTTPRequestHandler):
             updated_record = save_notion_sync_result(
                 updated_record["prediction_id"], notion_result
             )
+            retraining_status = start_retraining_if_ready()
             self.write_json(
                 {
                     "item": updated_record,
                     "notion_sync": notion_result.__dict__,
+                    "retraining": retraining_status.__dict__,
                 },
                 HTTPStatus.OK,
             )

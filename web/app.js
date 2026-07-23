@@ -61,6 +61,7 @@ const samples = [
 ];
 
 let sampleIndex = 0;
+let retrainingPollTimer = null;
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -77,6 +78,7 @@ refreshHistoryButton.addEventListener("click", async () => {
 });
 
 loadHistory();
+loadRetrainingStatus();
 
 function getPayload() {
   const formData = new FormData(form);
@@ -157,6 +159,7 @@ async function saveFeedback(predictionId, formElement) {
     }
     formElement.dataset.saved = "true";
     updateNotionSyncBanner(body.notion_sync);
+    updateRetrainingBanner(body.retraining);
     await loadHistory();
     setStatus("Saved", "is-done");
   } catch (error) {
@@ -164,6 +167,25 @@ async function saveFeedback(predictionId, formElement) {
     setStatus("Error", "is-error");
   } finally {
     saveButton.disabled = false;
+  }
+}
+
+async function loadRetrainingStatus() {
+  try {
+    const response = await fetch("/api/retraining");
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(body.error);
+    }
+    updateRetrainingBanner(body.retraining);
+  } catch (error) {
+    updateRetrainingBanner({
+      status: "failed",
+      pending_feedback_count: 0,
+      threshold: 0,
+      message: "再学習状態を取得できませんでした。",
+      error: error.message,
+    });
   }
 }
 
@@ -251,6 +273,48 @@ function createSlackNotificationBanner(slackNotification) {
     banner.append(detail);
   }
   return banner;
+}
+
+function createRetrainingBanner(retraining) {
+  const banner = document.createElement("div");
+  banner.className = "retraining-banner";
+
+  const status = retraining.status;
+  banner.classList.add(`is-${status}`);
+
+  const title = document.createElement("strong");
+  const labels = {
+    waiting: `モデル再学習待機中 ${retraining.pending_feedback_count}/${retraining.threshold}件`,
+    running: "フィードバックを使って候補モデルを学習中",
+    promoted: "再学習モデルを採用しました",
+    rejected: "精度を維持するため現行モデルを継続します",
+    failed: "モデル再学習に失敗しました",
+  };
+  title.textContent = labels[status] || `モデル再学習: ${status}`;
+  banner.append(title);
+
+  const detail = document.createElement("span");
+  detail.textContent = retraining.error || retraining.message;
+  banner.append(detail);
+  return banner;
+}
+
+function updateRetrainingBanner(retraining) {
+  const currentBanner = resultGrid.querySelector(".retraining-banner");
+  const nextBanner = createRetrainingBanner(retraining);
+  if (currentBanner) {
+    currentBanner.replaceWith(nextBanner);
+  } else {
+    resultGrid.append(nextBanner);
+  }
+
+  if (retrainingPollTimer) {
+    window.clearTimeout(retrainingPollTimer);
+    retrainingPollTimer = null;
+  }
+  if (retraining.status === "running") {
+    retrainingPollTimer = window.setTimeout(loadRetrainingStatus, 5000);
+  }
 }
 
 function createPredictionCard(prediction) {
