@@ -14,6 +14,7 @@ venv/
 models/
 reports/
 storage/
+server.*.log
 
 # Editor and OS files
 .DS_Store
