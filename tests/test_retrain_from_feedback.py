@@ -25,6 +25,8 @@ FEEDBACK_FIELDS = [
     "corrected_category",
     "corrected_priority",
     "corrected_department",
+    "note",
+    "reviewer_id",
     "feedback_saved_at",
 ]
 
@@ -39,6 +41,8 @@ def feedback_row(prediction_id: str, saved_at: str = "2026-07-23T10:00:00+09:00"
         "corrected_category": "ネットワーク",
         "corrected_priority": "Middle",
         "corrected_department": "インフラ",
+        "note": "VPN障害として確認しました",
+        "reviewer_id": "reviewer-01",
         "feedback_saved_at": saved_at,
     }
 
@@ -109,14 +113,16 @@ class RetrainFromFeedbackTest(unittest.TestCase):
         self.assertEqual(status.status, "waiting")
         self.assertEqual(status.complete_feedback_count, 5)
         self.assertEqual(status.pending_feedback_count, 5)
-        self.assertEqual(status.threshold, 10)
+        self.assertEqual(status.threshold, 20)
         saved_status = json.loads(self.status_path.read_text(encoding="utf-8"))
         self.assertEqual(saved_status["status"], "waiting")
 
     def test_start_retraining_launches_background_worker_at_threshold(self) -> None:
-        self.write_feedback([feedback_row(f"ticket-{index}") for index in range(10)])
+        self.write_feedback([feedback_row(f"ticket-{index}") for index in range(20)])
 
-        with patch.object(retrain, "Thread") as thread_class:
+        with patch.object(retrain, "feedback_gate_reasons", return_value=[]), patch.object(
+            retrain, "Thread"
+        ) as thread_class:
             status = retrain.start_retraining_if_ready()
 
         self.assertEqual(status.status, "running")
@@ -125,19 +131,45 @@ class RetrainFromFeedbackTest(unittest.TestCase):
 
     def test_candidate_requires_no_macro_f1_regression(self) -> None:
         metrics = {
-            "category": {"current_macro_f1": 0.70, "candidate_macro_f1": 0.71},
-            "priority": {
-                "current_macro_f1": 0.90,
-                "candidate_macro_f1": 0.90,
-                "current_high_recall": 1.0,
-                "candidate_high_recall": 1.0,
+            "category": {
+                "current": {"macro_f1": 0.70, "accepted_precision": 0.95, "coverage": 0.80},
+                "candidate": {"macro_f1": 0.71, "accepted_precision": 0.95, "coverage": 0.80},
             },
-            "department": {"current_macro_f1": 0.72, "candidate_macro_f1": 0.71},
+            "priority": {
+                "current": {
+                    "macro_f1": 0.90,
+                    "accepted_precision": 0.95,
+                    "coverage": 0.80,
+                    "high_recall": 1.0,
+                    "high_false_negatives": 0,
+                },
+                "candidate": {
+                    "macro_f1": 0.90,
+                    "accepted_precision": 0.95,
+                    "coverage": 0.80,
+                    "high_recall": 1.0,
+                    "high_false_negatives": 0,
+                },
+            },
+            "department": {
+                "current": {
+                    "macro_f1": 0.72,
+                    "accepted_precision": 0.95,
+                    "coverage": 0.80,
+                    "misroutes": 1,
+                },
+                "candidate": {
+                    "macro_f1": 0.71,
+                    "accepted_precision": 0.95,
+                    "coverage": 0.80,
+                    "misroutes": 1,
+                },
+            },
         }
 
         self.assertFalse(retrain.candidate_passes(metrics))
 
-        metrics["department"]["candidate_macro_f1"] = 0.72
+        metrics["department"]["candidate"]["macro_f1"] = 0.72
         self.assertTrue(retrain.candidate_passes(metrics))
 
     def test_feedback_dataframe_uses_corrected_labels(self) -> None:
@@ -147,6 +179,14 @@ class RetrainFromFeedbackTest(unittest.TestCase):
         self.assertEqual(data.iloc[0]["label_priority"], "Middle")
         self.assertEqual(data.iloc[0]["label_department"], "インフラ")
         self.assertIn("影響範囲=個人", data.iloc[0]["model_text"])
+
+    def test_feedback_gate_rejects_single_reviewer_and_label_bias(self) -> None:
+        rows = [feedback_row(f"ticket-{index}") for index in range(20)]
+
+        reasons = retrain.feedback_gate_reasons(rows, pending_count=20)
+
+        self.assertTrue(any("確認者" in reason for reason in reasons))
+        self.assertTrue(any("category" in reason for reason in reasons))
 
 
 if __name__ == "__main__":

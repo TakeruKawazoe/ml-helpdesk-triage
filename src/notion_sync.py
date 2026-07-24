@@ -25,6 +25,7 @@ CATEGORY_CHOICES = [
     "アカウント",
     "データ連携",
     "端末",
+    "その他・対象外",
 ]
 PRIORITY_CHOICES = ["High", "Middle", "Low"]
 DEPARTMENT_CHOICES = ["総務", "経理", "情シス", "開発", "インフラ"]
@@ -45,10 +46,13 @@ REQUIRED_SCHEMA = {
     "カテゴリ信頼度": {"number": {"format": "percent"}},
     "優先度信頼度": {"number": {"format": "percent"}},
     "担当部署信頼度": {"number": {"format": "percent"}},
+    "振り分け状態": {"select": {"options": [{"name": "自動振り分け"}, {"name": "要確認（一次受付）"}]}},
+    "要確認理由": {"rich_text": {}},
     "修正カテゴリ": {"select": {"options": [{"name": value} for value in CATEGORY_CHOICES]}},
     "修正優先度": {"select": {"options": [{"name": value} for value in PRIORITY_CHOICES]}},
     "修正担当部署": {"select": {"options": [{"name": value} for value in DEPARTMENT_CHOICES]}},
     "フィードバックメモ": {"rich_text": {}},
+    "確認者ID": {"rich_text": {}},
     "修正日時": {"date": {}},
 }
 
@@ -286,6 +290,8 @@ def prediction_properties(record: dict[str, str], title_property_name: str) -> d
         "カテゴリ信頼度": number_value(record["category_confidence"]),
         "優先度信頼度": number_value(record["priority_confidence"]),
         "担当部署信頼度": number_value(record["department_confidence"]),
+        "振り分け状態": select_value(record["routing_status"]),
+        "要確認理由": rich_text_value(record["review_reasons"]),
     }
 
 
@@ -295,6 +301,7 @@ def feedback_properties(record: dict[str, str]) -> dict[str, object]:
         "修正優先度": select_value(record["corrected_priority"]),
         "修正担当部署": select_value(record["corrected_department"]),
         "フィードバックメモ": rich_text_value(record["note"]),
+        "確認者ID": rich_text_value(record["reviewer_id"]),
         "修正日時": date_value(record["feedback_saved_at"]),
     }
 

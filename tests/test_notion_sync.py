@@ -68,10 +68,13 @@ class NotionSyncTest(unittest.TestCase):
             "category_confidence": "0.800000",
             "priority_confidence": "0.900000",
             "department_confidence": "0.700000",
+            "routing_status": "自動振り分け",
+            "review_reasons": "",
             "corrected_category": "アカウント",
             "corrected_priority": "High",
             "corrected_department": "情シス",
             "note": "確認済み",
+            "reviewer_id": "reviewer-01",
             "feedback_saved_at": "2026-07-22T10:05:00+09:00",
             "notion_page_id": PAGE_ID,
         }

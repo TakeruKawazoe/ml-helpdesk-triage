@@ -62,6 +62,7 @@ MODEL_SPECS = (
         {"High": 2.5, "Middle": 1.0, "Low": 1.0},
     ),
 )
+MODEL_SPEC_ORDER = {spec.name: index for index, spec in enumerate(MODEL_SPECS)}
 
 
 def load_dataset(path: Path) -> pd.DataFrame:
@@ -283,6 +284,31 @@ def selective_metrics(
     }
 
 
+def select_model_row(
+    target_name: str,
+    target_rows: list[dict[str, object]],
+) -> dict[str, object]:
+    if target_name == "priority":
+        return max(
+            target_rows,
+            key=lambda row: (
+                float(row["validation_macro_f1"]),
+                float(row["validation_high_recall"]),
+                float(row["validation_high_mean_probability"]),
+                float(row["validation_accuracy"]),
+                -MODEL_SPEC_ORDER[str(row["model"])],
+            ),
+        )
+    return max(
+        target_rows,
+        key=lambda row: (
+            float(row["validation_macro_f1"]),
+            float(row["validation_accuracy"]),
+            -MODEL_SPEC_ORDER[str(row["model"])],
+        ),
+    )
+
+
 def compare_models(
     development: pd.DataFrame,
     validation: pd.DataFrame,
@@ -328,26 +354,7 @@ def compare_models(
             }
             rows.append(row)
             target_rows.append(row)
-        if target_name == "priority":
-            winner = max(
-                target_rows,
-                key=lambda row: (
-                    float(row["validation_macro_f1"]),
-                    float(row["validation_high_recall"]),
-                    float(row["validation_high_mean_probability"]),
-                    float(row["validation_accuracy"]),
-                    -float(row["inference_ms_per_row"]),
-                ),
-            )
-        else:
-            winner = max(
-                target_rows,
-                key=lambda row: (
-                    float(row["validation_macro_f1"]),
-                    float(row["validation_accuracy"]),
-                    -float(row["inference_ms_per_row"]),
-                ),
-            )
+        winner = select_model_row(target_name, target_rows)
         selected_specs[target_name] = next(
             spec for spec in MODEL_SPECS if spec.name == winner["model"]
         )

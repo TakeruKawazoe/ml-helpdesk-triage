@@ -16,6 +16,7 @@ from modeling import (  # noqa: E402
     TRAIN_DATA_PATH,
     choose_confidence_threshold,
     load_dataset,
+    select_model_row,
     split_development_data,
 )
 
@@ -67,6 +68,26 @@ class ModelingTest(unittest.TestCase):
         self.assertGreaterEqual(len(high_sensitive), 2)
         for spec in high_sensitive:
             self.assertEqual(spec.class_weight["High"], 2.5)
+
+    def test_model_tie_break_does_not_depend_on_measured_runtime(self) -> None:
+        rows = [
+            {
+                "model": "hybrid_linear_svc",
+                "validation_macro_f1": 1.0,
+                "validation_accuracy": 1.0,
+                "inference_ms_per_row": 10.0,
+            },
+            {
+                "model": "hybrid_linear_svc_balanced",
+                "validation_macro_f1": 1.0,
+                "validation_accuracy": 1.0,
+                "inference_ms_per_row": 1.0,
+            },
+        ]
+
+        winner = select_model_row("category", rows)
+
+        self.assertEqual(winner["model"], "hybrid_linear_svc")
 
 
 if __name__ == "__main__":

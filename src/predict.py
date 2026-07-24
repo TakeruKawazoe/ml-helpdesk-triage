@@ -6,28 +6,35 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
 
-import numpy as np
+import joblib
 
-from train_baseline import (
-    MODEL_DIR,
-    SoftmaxLogisticRegression,
-    TfidfVectorizer,
-    build_text,
-)
+from modeling import MODEL_OUTPUT_DIR
+from train_baseline import build_text
 
 
 TARGETS = ["category", "priority", "department"]
 IMPACT_SCOPE_CHOICES = ["個人", "部署", "複数部署", "全社"]
 REQUESTER_ROLE_CHOICES = ["社員", "管理者", "経理担当", "開発者"]
 CHANNEL_CHOICES = ["Slack", "問い合わせフォーム", "メール", "電話"]
+MODEL_DIR = MODEL_OUTPUT_DIR
 MODEL_ACCESS_LOCK = RLock()
+MODEL_CACHE: dict[tuple[str, int, float], LoadedTarget] = {}
 
 
-@dataclass
+@dataclass(frozen=True)
+class LoadedTarget:
+    pipeline: object
+    classes: list[str]
+    confidence_threshold: float
+
+
+@dataclass(frozen=True)
 class PredictionResult:
     target: str
     label: str
     confidence: float
+    threshold: float
+    requires_review: bool
     ranking: list[dict[str, object]]
 
 
@@ -46,49 +53,92 @@ def build_model_text(
     return build_text(row)
 
 
-def load_target(
-    target: str,
-    model_dir: Path = MODEL_DIR,
-) -> tuple[TfidfVectorizer, SoftmaxLogisticRegression, list[str]]:
+def load_manifest(model_dir: Path = MODEL_DIR) -> dict[str, object]:
+    manifest_path = model_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            f"Improved model manifest is missing: {manifest_path}. "
+            "Run src/train_improved.py before prediction."
+        )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest["format"] != "sklearn-joblib-v1":
+        raise ValueError(f"Unsupported model format: {manifest['format']}")
+    return manifest
+
+
+def load_target(target: str, model_dir: Path = MODEL_DIR) -> LoadedTarget:
     with MODEL_ACCESS_LOCK:
-        metadata_path = model_dir / f"{target}_metadata.json"
-        arrays_path = model_dir / f"{target}_arrays.npz"
-        if not metadata_path.exists() or not arrays_path.exists():
-            raise FileNotFoundError(
-                f"Model artifacts for '{target}' are missing. "
-                "Run src/train_baseline.py before prediction."
-            )
+        manifest = load_manifest(model_dir)
+        target_metadata = manifest["targets"][target]
+        model_path = model_dir / target_metadata["model_file"]
+        if not model_path.exists():
+            raise FileNotFoundError(f"Model file is missing: {model_path}")
+        confidence_threshold = float(target_metadata["confidence_threshold"])
+        resolved_model_path = str(model_path.resolve())
+        cache_key = (
+            resolved_model_path,
+            model_path.stat().st_mtime_ns,
+            confidence_threshold,
+        )
+        cached = MODEL_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
 
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        with np.load(arrays_path) as arrays:
-            vectorizer = TfidfVectorizer(
-                vocab_=metadata["vocab"],
-                idf_=arrays["idf"].copy(),
-                min_n=metadata["min_n"],
-                max_n=metadata["max_n"],
-            )
-            model = SoftmaxLogisticRegression(weights_=arrays["weights"].copy())
-        classes = metadata["classes"]
-        return vectorizer, model, classes
+        pipeline = joblib.load(model_path)
+        classes = [str(value) for value in pipeline.classes_]
+        expected_classes = [str(value) for value in target_metadata["classes"]]
+        if classes != expected_classes:
+            raise ValueError(f"Model classes do not match the manifest for {target}.")
+        loaded = LoadedTarget(
+            pipeline=pipeline,
+            classes=classes,
+            confidence_threshold=confidence_threshold,
+        )
+        stale_keys = [
+            key
+            for key in MODEL_CACHE
+            if key[0] == resolved_model_path and key != cache_key
+        ]
+        for stale_key in stale_keys:
+            del MODEL_CACHE[stale_key]
+        MODEL_CACHE[cache_key] = loaded
+        return loaded
 
 
-def predict_target(target: str, model_text: str, top_k: int) -> PredictionResult:
-    vectorizer, model, classes = load_target(target)
-    x_values = vectorizer.transform([model_text])
-    probabilities = model.predict_proba(x_values)[0]
+def clear_model_cache() -> None:
+    with MODEL_ACCESS_LOCK:
+        MODEL_CACHE.clear()
+
+
+def predict_target(
+    target: str,
+    model_text: str,
+    top_k: int,
+    model_dir: Path = MODEL_DIR,
+) -> PredictionResult:
+    if target not in TARGETS:
+        raise ValueError(f"Unknown prediction target: {target}")
+    if top_k < 1:
+        raise ValueError("top_k must be greater than or equal to 1.")
+
+    loaded = load_target(target, model_dir=model_dir)
+    probabilities = loaded.pipeline.predict_proba([model_text])[0]
     ranking_indexes = probabilities.argsort()[::-1][:top_k]
     ranking = [
         {
-            "label": classes[index],
+            "label": loaded.classes[index],
             "confidence": round(float(probabilities[index]), 4),
         }
         for index in ranking_indexes
     ]
-    best = ranking[0]
+    best_index = int(ranking_indexes[0])
+    confidence = float(probabilities[best_index])
     return PredictionResult(
         target=target,
-        label=str(best["label"]),
-        confidence=float(best["confidence"]),
+        label=loaded.classes[best_index],
+        confidence=round(confidence, 4),
+        threshold=round(loaded.confidence_threshold, 4),
+        requires_review=confidence < loaded.confidence_threshold,
         ranking=ranking,
     )
 
@@ -108,9 +158,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    if args.top_k < 1:
-        raise ValueError("--top-k must be greater than or equal to 1.")
-
     model_text = build_model_text(
         inquiry_text=args.text,
         impact_scope=args.impact_scope,
@@ -132,6 +179,11 @@ def main() -> None:
                         "requester_role": args.requester_role,
                         "channel": args.channel,
                     },
+                    "routing_status": (
+                        "要確認（一次受付）"
+                        if any(result.requires_review for result in results)
+                        else "自動振り分け"
+                    ),
                     "predictions": [result.__dict__ for result in results],
                 },
                 ensure_ascii=False,
@@ -140,9 +192,20 @@ def main() -> None:
         )
         return
 
-    print("予測結果")
+    print(
+        "振り分け: "
+        + (
+            "要確認（一次受付）"
+            if any(result.requires_review for result in results)
+            else "自動振り分け"
+        )
+    )
     for result in results:
-        print(f"- {result.target}: {result.label} ({result.confidence:.4f})")
+        review_label = " / 要確認" if result.requires_review else ""
+        print(
+            f"- {result.target}: {result.label} ({result.confidence:.4f})"
+            f" / 基準={result.threshold:.4f}{review_label}"
+        )
         for rank in result.ranking:
             print(f"  - {rank['label']}: {rank['confidence']:.4f}")
 

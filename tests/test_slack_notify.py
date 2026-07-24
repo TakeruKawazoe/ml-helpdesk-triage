@@ -44,6 +44,8 @@ class SlackNotificationTest(unittest.TestCase):
             "predicted_priority": "Middle",
             "predicted_department": "インフラ",
             "notion_page_id": "3a5d3d7e-828c-81f3-9e7e-f3c6bd72681e",
+            "routing_status": "自動振り分け",
+            "review_reasons": "",
         }
 
     def test_low_priority_is_skipped_without_configuration(self) -> None:
@@ -71,6 +73,7 @@ class SlackNotificationTest(unittest.TestCase):
         self.assertIn("<@U0000000005>", message)
         self.assertIn("*優先度:* Middle", message)
         self.assertIn("*担当部署:* インフラ", message)
+        self.assertIn("*振り分け:* 自動振り分け", message)
         self.assertIn(
             "https://www.notion.so/3a5d3d7e828c81f39e7ef3c6bd72681e",
             message,

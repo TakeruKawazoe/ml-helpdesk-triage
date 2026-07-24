@@ -4,7 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+from types import SimpleNamespace as Namespace
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -12,6 +12,16 @@ SRC_DIR = ROOT_DIR / "src"
 sys.path.insert(0, str(SRC_DIR))
 
 import web_app  # noqa: E402
+
+
+def SimpleNamespace(*, target: str, label: str, confidence: float) -> Namespace:
+    return Namespace(
+        target=target,
+        label=label,
+        confidence=confidence,
+        threshold=0.5,
+        requires_review=False,
+    )
 
 
 class WebHistoryTest(unittest.TestCase):
@@ -52,6 +62,7 @@ class WebHistoryTest(unittest.TestCase):
                 "corrected_priority": "Middle",
                 "corrected_department": "インフラ",
                 "note": "VPN問い合わせとして修正",
+                "reviewer_id": "reviewer-01",
             }
         )
         history = web_app.read_history(limit=10)
@@ -64,6 +75,8 @@ class WebHistoryTest(unittest.TestCase):
         self.assertEqual(history[0]["note"], "VPN問い合わせとして修正")
         self.assertTrue(history[0]["feedback_saved_at"])
         self.assertEqual(history[0]["category_confidence"], "0.800000")
+        self.assertEqual(history[0]["routing_status"], "自動振り分け")
+        self.assertEqual(history[0]["reviewer_id"], "reviewer-01")
 
     def test_feedback_update_preserves_other_history_rows(self) -> None:
         first = web_app.save_prediction(
@@ -100,6 +113,7 @@ class WebHistoryTest(unittest.TestCase):
                 "corrected_priority": "Middle",
                 "corrected_department": "経理",
                 "note": "",
+                "reviewer_id": "reviewer-01",
             }
         )
         history_ids = {row["prediction_id"] for row in web_app.read_history(limit=10)}
@@ -166,6 +180,24 @@ class WebHistoryTest(unittest.TestCase):
         self.assertEqual(history[0]["prediction_id"], "old-id")
         self.assertEqual(history[0]["notion_sync_status"], "")
         self.assertEqual(history[0]["slack_notification_status"], "")
+        self.assertEqual(history[0]["routing_status"], "")
+
+    def test_low_confidence_prediction_is_routed_for_review(self) -> None:
+        result = web_app.routing_result(
+            [
+                Namespace(
+                    target="category",
+                    label="その他・対象外",
+                    confidence=0.4,
+                    threshold=0.6,
+                    requires_review=True,
+                )
+            ]
+        )
+
+        self.assertTrue(result["review_required"])
+        self.assertEqual(result["status"], "要確認（一次受付）")
+        self.assertIn("category", result["reasons"][0])
 
     def test_validate_string_field_rejects_non_string_value(self) -> None:
         with self.assertRaises(ValueError):

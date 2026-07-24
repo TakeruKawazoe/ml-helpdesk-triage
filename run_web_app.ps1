@@ -41,6 +41,10 @@ foreach ($variableName in $slackVariableNames) {
     }
 }
 
+if (-not (Test-Path -LiteralPath "models\improved\manifest.json")) {
+    throw "Improved model artifacts are missing. Run: python src\train_improved.py"
+}
+
 python src\web_app.py
 
 if ($LASTEXITCODE -ne 0) {

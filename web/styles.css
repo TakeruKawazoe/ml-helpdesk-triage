@@ -273,9 +273,14 @@ button:disabled {
   padding: 16px;
 }
 
+.prediction-card.requires-review {
+  border-color: #efaaa4;
+}
+
 .notion-sync-banner,
 .slack-notification-banner,
-.retraining-banner {
+.retraining-banner,
+.routing-banner {
   display: grid;
   gap: 3px;
   border: 1px solid var(--border);
@@ -288,7 +293,8 @@ button:disabled {
 
 .notion-sync-banner.is-synced,
 .slack-notification-banner.is-sent,
-.retraining-banner.is-promoted {
+.retraining-banner.is-promoted,
+.routing-banner.is-automatic {
   border-color: #9ed3ae;
   background: #edf8f0;
   color: var(--success);
@@ -298,7 +304,8 @@ button:disabled {
 .notion-sync-banner.is-not_linked,
 .slack-notification-banner.is-failed,
 .retraining-banner.is-failed,
-.retraining-banner.is-rejected {
+.retraining-banner.is-rejected,
+.routing-banner.is-review {
   border-color: #efaaa4;
   background: #fff3f2;
   color: var(--danger);
@@ -306,7 +313,8 @@ button:disabled {
 
 .notion-sync-banner span,
 .slack-notification-banner span,
-.retraining-banner span {
+.retraining-banner span,
+.routing-banner span {
   overflow-wrap: anywhere;
 }
 
@@ -370,8 +378,19 @@ button:disabled {
   font-weight: 800;
 }
 
+.review-chip {
+  display: inline-block;
+  margin-top: 7px;
+  border-radius: 4px;
+  padding: 3px 6px;
+  background: #fff3f2;
+  color: var(--danger);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
 .confidence {
-  min-width: 84px;
+  min-width: 132px;
   padding: 7px 9px;
   border-radius: 6px;
   background: var(--surface-muted);

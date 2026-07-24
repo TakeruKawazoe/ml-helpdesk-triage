@@ -17,7 +17,7 @@ const correctionFields = [
     name: "corrected_category",
     label: "正解カテゴリ",
     target: "category",
-    options: ["勤怠", "請求", "権限", "システム障害", "ネットワーク", "アカウント", "データ連携", "端末"],
+    options: ["勤怠", "請求", "権限", "システム障害", "ネットワーク", "アカウント", "データ連携", "端末", "その他・対象外"],
   },
   {
     name: "corrected_priority",
@@ -57,6 +57,12 @@ const samples = [
     impact_scope: "複数部署",
     requester_role: "管理者",
     channel: "メール",
+  },
+  {
+    text: "会議室のエアコンから異音がするため確認をお願いします",
+    impact_scope: "部署",
+    requester_role: "社員",
+    channel: "問い合わせフォーム",
   },
 ];
 
@@ -120,6 +126,7 @@ async function predict(payload) {
       body.prediction_id,
       body.notion_sync,
       body.slack_notification,
+      body.routing,
     );
     await loadHistory();
     setStatus("Done", "is-done");
@@ -139,6 +146,7 @@ async function saveFeedback(predictionId, formElement) {
     corrected_priority: formData.get("corrected_priority"),
     corrected_department: formData.get("corrected_department"),
     note: formData.get("note"),
+    reviewer_id: formData.get("reviewer_id"),
   };
 
   setStatus("Saving", "is-busy");
@@ -199,7 +207,7 @@ async function loadHistory() {
   renderHistory(body.items);
 }
 
-function renderPredictions(predictions, predictionId, notionSync, slackNotification) {
+function renderPredictions(predictions, predictionId, notionSync, slackNotification, routing) {
   if (!predictionId) {
     throw new Error("prediction_id is empty.");
   }
@@ -208,11 +216,30 @@ function renderPredictions(predictions, predictionId, notionSync, slackNotificat
   }
 
   resultGrid.replaceChildren(
+    createRoutingBanner(routing),
     ...predictions.map((prediction) => createPredictionCard(prediction)),
     createNotionSyncBanner(notionSync),
     createSlackNotificationBanner(slackNotification),
     createFeedbackForm(predictions, predictionId),
   );
+}
+
+function createRoutingBanner(routing) {
+  const banner = document.createElement("div");
+  banner.className = "routing-banner";
+  const reviewRequired = routing?.review_required === true;
+  banner.classList.add(reviewRequired ? "is-review" : "is-automatic");
+
+  const title = document.createElement("strong");
+  title.textContent = routing?.status || "振り分け状態不明";
+  banner.append(title);
+
+  if (Array.isArray(routing?.reasons) && routing.reasons.length > 0) {
+    const detail = document.createElement("span");
+    detail.textContent = routing.reasons.join(" / ");
+    banner.append(detail);
+  }
+  return banner;
 }
 
 function createNotionSyncBanner(notionSync) {
@@ -328,6 +355,9 @@ function createPredictionCard(prediction) {
   const card = document.createElement("article");
   card.className = "prediction-card";
   card.dataset.target = prediction.target;
+  if (prediction.requires_review) {
+    card.classList.add("requires-review");
+  }
 
   const top = document.createElement("div");
   top.className = "prediction-top";
@@ -341,10 +371,16 @@ function createPredictionCard(prediction) {
   predictedLabel.className = "predicted-label";
   predictedLabel.textContent = prediction.label;
   labelGroup.append(targetName, predictedLabel);
+  if (prediction.requires_review) {
+    const reviewChip = document.createElement("span");
+    reviewChip.className = "review-chip";
+    reviewChip.textContent = "要確認";
+    labelGroup.append(reviewChip);
+  }
 
   const confidence = document.createElement("span");
   confidence.className = "confidence";
-  confidence.textContent = formatPercent(prediction.confidence);
+  confidence.textContent = `${formatPercent(prediction.confidence)} / 基準 ${formatPercent(prediction.threshold)}`;
   top.append(labelGroup, confidence);
 
   const rankingList = document.createElement("div");
@@ -385,12 +421,23 @@ function createFeedbackForm(predictions, predictionId) {
 
   const noteGroup = document.createElement("label");
   noteGroup.className = "note-group";
-  noteGroup.textContent = "メモ";
+  noteGroup.textContent = "修正理由";
   const note = document.createElement("textarea");
   note.name = "note";
   note.rows = 3;
   note.placeholder = "修正理由";
+  note.required = true;
   noteGroup.append(note);
+
+  const reviewerGroup = document.createElement("label");
+  reviewerGroup.className = "field-group";
+  reviewerGroup.textContent = "確認者ID";
+  const reviewer = document.createElement("input");
+  reviewer.name = "reviewer_id";
+  reviewer.type = "text";
+  reviewer.placeholder = "例: reviewer-01";
+  reviewer.required = true;
+  reviewerGroup.append(reviewer);
 
   const buttonRow = document.createElement("div");
   buttonRow.className = "button-row feedback-actions";
@@ -399,7 +446,7 @@ function createFeedbackForm(predictions, predictionId) {
   saveButton.textContent = "修正を保存";
   buttonRow.append(saveButton);
 
-  formElement.append(title, grid, noteGroup, buttonRow);
+  formElement.append(title, grid, reviewerGroup, noteGroup, buttonRow);
   return formElement;
 }
 
@@ -483,6 +530,7 @@ function createHistoryCard(item) {
     createBadge(`影響範囲: ${item.impact_scope}`),
     createBadge(`依頼者: ${item.requester_role}`),
     createBadge(`経路: ${item.channel}`),
+    createBadge(item.routing_status || "振り分け状態不明"),
   );
   if (item.notion_sync_status) {
     meta.append(createBadge(notionHistoryLabel(item.notion_sync_status)));

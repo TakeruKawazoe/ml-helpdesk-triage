@@ -60,6 +60,7 @@ CATEGORY_CHOICES = [
     "アカウント",
     "データ連携",
     "端末",
+    "その他・対象外",
 ]
 PRIORITY_CHOICES = ["High", "Middle", "Low"]
 DEPARTMENT_CHOICES = ["総務", "経理", "情シス", "開発", "インフラ"]
@@ -76,10 +77,14 @@ HISTORY_FIELDS = [
     "category_confidence",
     "priority_confidence",
     "department_confidence",
+    "review_required",
+    "routing_status",
+    "review_reasons",
     "corrected_category",
     "corrected_priority",
     "corrected_department",
     "note",
+    "reviewer_id",
     "feedback_saved_at",
     "notion_page_id",
     "notion_sync_status",
@@ -178,6 +183,7 @@ class HelpdeskTriageHandler(BaseHTTPRequestHandler):
                 "prediction_id": history_record["prediction_id"],
                 "input": payload,
                 "predictions": [result.__dict__ for result in results],
+                "routing": routing_result(results),
                 "notion_sync": notion_result.__dict__,
                 "slack_notification": slack_result.__dict__,
             },
@@ -213,6 +219,7 @@ class HelpdeskTriageHandler(BaseHTTPRequestHandler):
             "corrected_priority",
             "corrected_department",
             "note",
+            "reviewer_id",
         }
         missing_fields = sorted(required_fields - payload.keys())
         if missing_fields:
@@ -223,6 +230,13 @@ class HelpdeskTriageHandler(BaseHTTPRequestHandler):
             raise ValueError("prediction_id must not be empty.")
         payload["prediction_id"] = prediction_id
         payload["note"] = validate_string_field("note", payload["note"])
+        payload["reviewer_id"] = validate_string_field(
+            "reviewer_id", payload["reviewer_id"]
+        )
+        if not payload["note"]:
+            raise ValueError("note must explain why the feedback is correct.")
+        if not payload["reviewer_id"]:
+            raise ValueError("reviewer_id must not be empty.")
 
         validate_choice("corrected_category", payload["corrected_category"], CATEGORY_CHOICES)
         validate_choice("corrected_priority", payload["corrected_priority"], PRIORITY_CHOICES)
@@ -299,6 +313,7 @@ def save_prediction(payload: dict[str, str], results: list[object]) -> dict[str,
             f"{result.target}_confidence": f"{result.confidence:.6f}"
             for result in results
         }
+        routing = routing_result(results)
         record = {
             "prediction_id": str(uuid.uuid4()),
             "created_at": current_timestamp(),
@@ -312,10 +327,14 @@ def save_prediction(payload: dict[str, str], results: list[object]) -> dict[str,
             "category_confidence": confidence_map["category_confidence"],
             "priority_confidence": confidence_map["priority_confidence"],
             "department_confidence": confidence_map["department_confidence"],
+            "review_required": str(routing["review_required"]).lower(),
+            "routing_status": str(routing["status"]),
+            "review_reasons": " / ".join(routing["reasons"]),
             "corrected_category": "",
             "corrected_priority": "",
             "corrected_department": "",
             "note": "",
+            "reviewer_id": "",
             "feedback_saved_at": "",
             "notion_page_id": "",
             "notion_sync_status": "",
@@ -343,6 +362,7 @@ def save_feedback(payload: dict[str, str]) -> dict[str, str]:
                 row["corrected_priority"] = payload["corrected_priority"]
                 row["corrected_department"] = payload["corrected_department"]
                 row["note"] = payload["note"]
+                row["reviewer_id"] = payload["reviewer_id"]
                 row["feedback_saved_at"] = current_timestamp()
                 updated_record = row
                 break
@@ -475,10 +495,27 @@ def current_timestamp() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def routing_result(results: list[object]) -> dict[str, object]:
+    review_results = [result for result in results if result.requires_review]
+    reasons = [
+        (
+            f"{result.target}: 信頼度{result.confidence:.1%}が"
+            f"基準{result.threshold:.1%}未満"
+        )
+        for result in review_results
+    ]
+    return {
+        "review_required": bool(review_results),
+        "status": "要確認（一次受付）" if review_results else "自動振り分け",
+        "reasons": reasons,
+    }
+
+
 def main() -> None:
     if not (WEB_DIR / "index.html").exists():
         raise FileNotFoundError("web/index.html does not exist.")
 
+    ensure_history_file()
     server = ThreadingHTTPServer((HOST, PORT), HelpdeskTriageHandler)
     print(f"Serving Helpdesk Triage UI at http://{HOST}:{PORT}")
     server.serve_forever()

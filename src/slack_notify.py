@@ -183,6 +183,12 @@ def build_notification_text(record: dict[str, str], member_id: str) -> str:
     return "\n".join(
         [
             f"<@{member_id}> 新しい問い合わせです",
+            f"*振り分け:* {escape_slack_text(record['routing_status'])}",
+            *(
+                [f"*要確認理由:* {escape_slack_text(record['review_reasons'])}"]
+                if record["review_reasons"]
+                else []
+            ),
             f"*問い合わせ:* {escape_slack_text(record['text'])}",
             f"*優先度:* {escape_slack_text(record['predicted_priority'])}",
             f"*カテゴリ:* {escape_slack_text(record['predicted_category'])}",
