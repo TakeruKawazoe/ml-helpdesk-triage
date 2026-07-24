@@ -33,6 +33,7 @@ body {
 }
 
 button,
+input,
 select,
 textarea {
   font: inherit;
@@ -136,6 +137,7 @@ label {
 }
 
 textarea,
+input,
 select {
   width: 100%;
   border: 1px solid var(--border);
@@ -161,7 +163,13 @@ select {
   padding: 0 11px;
 }
 
+input {
+  min-height: 44px;
+  padding: 0 11px;
+}
+
 textarea:focus,
+input:focus,
 select:focus {
   border-color: var(--accent);
   background: #ffffff;
@@ -214,6 +222,17 @@ button:disabled {
 .secondary-button:hover {
   border-color: #b6c7ce;
   background: #e5edf0;
+}
+
+.danger-button {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.danger-button:hover {
+  border-color: #8f1c14;
+  background: #8f1c14;
 }
 
 .result-panel {
@@ -449,9 +468,53 @@ button:disabled {
   overflow: hidden;
 }
 
+.history-header-actions,
+.history-filter-actions,
+.history-card-actions,
+.history-pagination,
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .compact-button {
   min-width: 72px;
   min-height: 36px;
+}
+
+.history-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+  background: #fbfcfd;
+}
+
+.history-search-field {
+  grid-column: span 2;
+}
+
+.history-filter-actions {
+  grid-column: span 2;
+  align-self: end;
+  justify-content: flex-end;
+}
+
+.history-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.history-pagination {
+  justify-content: flex-end;
+  padding: 0 18px 18px;
 }
 
 .history-card {
@@ -462,6 +525,11 @@ button:disabled {
 
 .history-card.has-feedback {
   border-color: #9ed3ae;
+}
+
+.history-card.is-deleted {
+  border-color: #c7cfd3;
+  background: #f7f8f9;
 }
 
 .history-top {
@@ -544,6 +612,60 @@ button:disabled {
   font-weight: 700;
 }
 
+.deletion-note {
+  border-left-color: var(--danger);
+  background: #fff3f2;
+}
+
+.history-card-actions {
+  justify-content: flex-end;
+}
+
+.history-action-dialog {
+  width: min(520px, calc(100% - 32px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0;
+  background: var(--surface);
+  box-shadow: 0 24px 64px rgba(19, 39, 48, 0.24);
+}
+
+.history-action-dialog::backdrop {
+  background: rgba(27, 36, 40, 0.52);
+}
+
+.history-action-dialog form {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.history-action-dialog textarea {
+  min-height: 96px;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.icon-button {
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.dialog-actions {
+  justify-content: flex-end;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     width: min(100% - 24px, 680px);
@@ -557,8 +679,19 @@ button:disabled {
 
   .workspace,
   .control-grid,
-  .correction-grid {
+  .correction-grid,
+  .history-filters {
     grid-template-columns: 1fr;
+  }
+
+  .history-search-field,
+  .history-filter-actions {
+    grid-column: auto;
+  }
+
+  .history-filter-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
   }
 
   .button-row {
@@ -580,5 +713,27 @@ button:disabled {
 
   .label-pair {
     flex: 1 1 100%;
+  }
+
+  .history-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .history-header-actions,
+  .history-pagination,
+  .dialog-actions {
+    width: 100%;
+  }
+
+  .history-header-actions button,
+  .history-pagination button,
+  .dialog-actions button {
+    flex: 1 1 0;
+  }
+
+  .icon-button {
+    flex: 0 0 36px;
+    width: 36px;
   }
 }

@@ -5,6 +5,19 @@ const statusPill = document.querySelector("#statusPill");
 const submitButton = document.querySelector("#submitButton");
 const sampleButton = document.querySelector("#sampleButton");
 const refreshHistoryButton = document.querySelector("#refreshHistoryButton");
+const exportHistoryButton = document.querySelector("#exportHistoryButton");
+const historyFilterForm = document.querySelector("#historyFilterForm");
+const resetHistoryFiltersButton = document.querySelector("#resetHistoryFiltersButton");
+const historyCount = document.querySelector("#historyCount");
+const historyPageLabel = document.querySelector("#historyPageLabel");
+const previousHistoryPageButton = document.querySelector("#previousHistoryPageButton");
+const nextHistoryPageButton = document.querySelector("#nextHistoryPageButton");
+const historyActionDialog = document.querySelector("#historyActionDialog");
+const historyActionForm = document.querySelector("#historyActionForm");
+const historyActionTitle = document.querySelector("#historyActionTitle");
+const confirmHistoryActionButton = document.querySelector("#confirmHistoryActionButton");
+const closeHistoryActionButton = document.querySelector("#closeHistoryActionButton");
+const cancelHistoryActionButton = document.querySelector("#cancelHistoryActionButton");
 
 const targetLabels = {
   category: "カテゴリ",
@@ -68,6 +81,13 @@ const samples = [
 
 let sampleIndex = 0;
 let retrainingPollTimer = null;
+let pendingHistoryAction = null;
+const historyState = {
+  page: 1,
+  pageSize: 10,
+  total: 0,
+  totalPages: 1,
+};
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -82,6 +102,48 @@ sampleButton.addEventListener("click", () => {
 refreshHistoryButton.addEventListener("click", async () => {
   await loadHistory();
 });
+
+exportHistoryButton.addEventListener("click", () => {
+  const link = document.createElement("a");
+  link.href = `/api/history/export.csv?${buildHistoryQuery(false)}`;
+  link.click();
+});
+
+historyFilterForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  historyState.page = 1;
+  await loadHistory();
+});
+
+resetHistoryFiltersButton.addEventListener("click", async () => {
+  historyFilterForm.reset();
+  historyState.page = 1;
+  await loadHistory();
+});
+
+previousHistoryPageButton.addEventListener("click", async () => {
+  if (historyState.page <= 1) {
+    return;
+  }
+  historyState.page -= 1;
+  await loadHistory();
+});
+
+nextHistoryPageButton.addEventListener("click", async () => {
+  if (historyState.page >= historyState.totalPages) {
+    return;
+  }
+  historyState.page += 1;
+  await loadHistory();
+});
+
+historyActionForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await submitHistoryAction();
+});
+
+closeHistoryActionButton.addEventListener("click", closeHistoryActionDialog);
+cancelHistoryActionButton.addEventListener("click", closeHistoryActionDialog);
 
 loadHistory();
 loadRetrainingStatus();
@@ -198,13 +260,49 @@ async function loadRetrainingStatus() {
 }
 
 async function loadHistory() {
-  const response = await fetch("/api/history?limit=10");
-  const body = await response.json();
-  if (!response.ok) {
-    renderHistoryError(body.error);
-    return;
+  try {
+    const response = await fetch(`/api/history?${buildHistoryQuery(true)}`);
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(body.error);
+    }
+    if (historyState.page > body.total_pages) {
+      historyState.page = body.total_pages;
+      await loadHistory();
+      return;
+    }
+    historyState.page = body.page;
+    historyState.pageSize = body.page_size;
+    historyState.total = body.total;
+    historyState.totalPages = body.total_pages;
+    renderHistory(body.items);
+    updateHistorySummary();
+  } catch (error) {
+    renderHistoryError(error.message);
   }
-  renderHistory(body.items);
+}
+
+function buildHistoryQuery(includePagination) {
+  const parameters = new URLSearchParams();
+  const formData = new FormData(historyFilterForm);
+  formData.forEach((value, key) => {
+    const normalizedValue = String(value).trim();
+    if (normalizedValue) {
+      parameters.set(key, normalizedValue);
+    }
+  });
+  if (includePagination) {
+    parameters.set("page", String(historyState.page));
+    parameters.set("page_size", String(historyState.pageSize));
+  }
+  return parameters.toString();
+}
+
+function updateHistorySummary() {
+  historyCount.textContent = `${historyState.total}件`;
+  historyPageLabel.textContent = `${historyState.page} / ${historyState.totalPages}ページ`;
+  previousHistoryPageButton.disabled = historyState.page <= 1;
+  nextHistoryPageButton.disabled = historyState.page >= historyState.totalPages;
 }
 
 function renderPredictions(predictions, predictionId, notionSync, slackNotification, routing) {
@@ -515,6 +613,9 @@ function createHistoryCard(item) {
   if (item.feedback_saved_at) {
     card.classList.add("has-feedback");
   }
+  if (item.deleted_at) {
+    card.classList.add("is-deleted");
+  }
 
   const top = document.createElement("div");
   top.className = "history-top";
@@ -537,6 +638,9 @@ function createHistoryCard(item) {
   }
   if (item.slack_notification_status) {
     meta.append(createBadge(slackHistoryLabel(item.slack_notification_status)));
+  }
+  if (item.deleted_at) {
+    meta.append(createBadge("削除済み"));
   }
 
   const predicted = document.createElement("div");
@@ -571,7 +675,89 @@ function createHistoryCard(item) {
     }
   }
 
+  if (item.deleted_at) {
+    const deletedNote = document.createElement("p");
+    deletedNote.className = "history-note deletion-note";
+    const deletedLabel = document.createElement("span");
+    deletedLabel.textContent = `削除: ${item.deleted_by} / ${formatDateTime(item.deleted_at)}`;
+    const deletedReason = document.createElement("strong");
+    deletedReason.textContent = item.delete_reason;
+    deletedNote.append(deletedLabel, deletedReason);
+    card.append(deletedNote);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "history-card-actions";
+  const actionButton = document.createElement("button");
+  actionButton.type = "button";
+  actionButton.className = item.deleted_at
+    ? "secondary-button compact-button"
+    : "danger-button compact-button";
+  actionButton.textContent = item.deleted_at ? "復元" : "削除";
+  actionButton.addEventListener("click", () => {
+    openHistoryActionDialog(item, item.deleted_at ? "restore" : "delete");
+  });
+  actions.append(actionButton);
+  card.append(actions);
+
   return card;
+}
+
+function openHistoryActionDialog(item, action) {
+  pendingHistoryAction = {
+    predictionId: item.prediction_id,
+    action,
+  };
+  const isDelete = action === "delete";
+  historyActionTitle.textContent = isDelete ? "履歴を削除" : "履歴を復元";
+  confirmHistoryActionButton.textContent = isDelete ? "削除する" : "復元する";
+  confirmHistoryActionButton.className = isDelete ? "danger-button" : "";
+  historyActionForm.reset();
+  historyActionDialog.showModal();
+}
+
+function closeHistoryActionDialog() {
+  historyActionDialog.close();
+  pendingHistoryAction = null;
+}
+
+async function submitHistoryAction() {
+  if (!pendingHistoryAction) {
+    throw new Error("History action is not selected.");
+  }
+  const formData = new FormData(historyActionForm);
+  const payload = {
+    actor_id: formData.get("actor_id"),
+    reason: formData.get("reason"),
+  };
+  const isDelete = pendingHistoryAction.action === "delete";
+  const path = isDelete
+    ? `/api/history/${encodeURIComponent(pendingHistoryAction.predictionId)}`
+    : `/api/history/${encodeURIComponent(pendingHistoryAction.predictionId)}/restore`;
+  confirmHistoryActionButton.disabled = true;
+  setStatus(isDelete ? "Deleting" : "Restoring", "is-busy");
+
+  try {
+    const response = await fetch(path, {
+      method: isDelete ? "DELETE" : "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(body.error);
+    }
+    closeHistoryActionDialog();
+    await loadHistory();
+    setStatus(isDelete ? "Deleted" : "Restored", "is-done");
+  } catch (error) {
+    renderHistoryError(error.message);
+    setStatus("Error", "is-error");
+  } finally {
+    confirmHistoryActionButton.disabled = false;
+  }
 }
 
 function notionHistoryLabel(status) {

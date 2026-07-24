@@ -82,7 +82,118 @@
             <p class="eyebrow">History</p>
             <h2>予測履歴</h2>
           </div>
-          <button type="button" class="secondary-button compact-button" id="refreshHistoryButton">更新</button>
+          <div class="history-header-actions">
+            <button type="button" class="secondary-button compact-button" id="exportHistoryButton">CSV出力</button>
+            <button type="button" class="secondary-button compact-button" id="refreshHistoryButton">更新</button>
+          </div>
+        </div>
+        <form class="history-filters" id="historyFilterForm">
+          <label class="field-group history-search-field">
+            キーワード
+            <input type="search" name="q" placeholder="問い合わせ文、予測ID、メモ、確認者ID">
+          </label>
+          <label class="field-group">
+            開始日
+            <input type="date" name="date_from">
+          </label>
+          <label class="field-group">
+            終了日
+            <input type="date" name="date_to">
+          </label>
+          <label class="field-group">
+            カテゴリ
+            <select name="category">
+              <option value="">すべて</option>
+              <option value="勤怠">勤怠</option>
+              <option value="請求">請求</option>
+              <option value="権限">権限</option>
+              <option value="システム障害">システム障害</option>
+              <option value="ネットワーク">ネットワーク</option>
+              <option value="アカウント">アカウント</option>
+              <option value="データ連携">データ連携</option>
+              <option value="端末">端末</option>
+              <option value="その他・対象外">その他・対象外</option>
+            </select>
+          </label>
+          <label class="field-group">
+            優先度
+            <select name="priority">
+              <option value="">すべて</option>
+              <option value="High">High</option>
+              <option value="Middle">Middle</option>
+              <option value="Low">Low</option>
+            </select>
+          </label>
+          <label class="field-group">
+            担当部署
+            <select name="department">
+              <option value="">すべて</option>
+              <option value="総務">総務</option>
+              <option value="経理">経理</option>
+              <option value="情シス">情シス</option>
+              <option value="開発">開発</option>
+              <option value="インフラ">インフラ</option>
+            </select>
+          </label>
+          <label class="field-group">
+            振り分け
+            <select name="routing_status">
+              <option value="">すべて</option>
+              <option value="自動振り分け">自動振り分け</option>
+              <option value="要確認（一次受付）">要確認（一次受付）</option>
+            </select>
+          </label>
+          <label class="field-group">
+            フィードバック
+            <select name="feedback_status">
+              <option value="all">すべて</option>
+              <option value="with_feedback">登録済み</option>
+              <option value="without_feedback">未登録</option>
+            </select>
+          </label>
+          <label class="field-group">
+            Notion
+            <select name="notion_status">
+              <option value="">すべて</option>
+              <option value="synced">同期済み</option>
+              <option value="disabled">未設定</option>
+              <option value="failed">同期失敗</option>
+              <option value="not_linked">未連携</option>
+            </select>
+          </label>
+          <label class="field-group">
+            Slack
+            <select name="slack_status">
+              <option value="">すべて</option>
+              <option value="sent">通知済み</option>
+              <option value="skipped">対象外</option>
+              <option value="disabled">未設定</option>
+              <option value="failed">通知失敗</option>
+            </select>
+          </label>
+          <label class="field-group">
+            削除状態
+            <select name="deleted_status">
+              <option value="active">有効な履歴</option>
+              <option value="deleted">削除済み</option>
+              <option value="all">すべて</option>
+            </select>
+          </label>
+          <label class="field-group">
+            並び順
+            <select name="sort_order">
+              <option value="newest">新しい順</option>
+              <option value="oldest">古い順</option>
+            </select>
+          </label>
+          <div class="history-filter-actions">
+            <button type="button" class="secondary-button" id="resetHistoryFiltersButton">条件を解除</button>
+            <button type="submit">絞り込む</button>
+          </div>
+        </form>
+        <div class="history-summary" aria-live="polite">
+          <span id="historyCount">0件</span>
+          <span id="historyPageLabel">1 / 1ページ</span>
         </div>
         <div class="history-list" id="historyList">
           <article class="empty-state">
@@ -90,8 +201,33 @@
             <span>Waiting</span>
           </article>
         </div>
+        <nav class="history-pagination" aria-label="履歴ページ送り">
+          <button type="button" class="secondary-button compact-button" id="previousHistoryPageButton">前へ</button>
+          <button type="button" class="secondary-button compact-button" id="nextHistoryPageButton">次へ</button>
+        </nav>
       </section>
     </main>
+
+    <dialog class="history-action-dialog" id="historyActionDialog">
+      <form method="dialog" id="historyActionForm">
+        <div class="dialog-header">
+          <h2 id="historyActionTitle">履歴を削除</h2>
+          <button type="button" class="icon-button" id="closeHistoryActionButton" aria-label="閉じる">×</button>
+        </div>
+        <label class="field-group">
+          実行者ID
+          <input type="text" name="actor_id" placeholder="例: operator-01" required>
+        </label>
+        <label class="field-group">
+          理由
+          <textarea name="reason" rows="3" placeholder="操作理由" required></textarea>
+        </label>
+        <div class="dialog-actions">
+          <button type="button" class="secondary-button" id="cancelHistoryActionButton">キャンセル</button>
+          <button type="submit" id="confirmHistoryActionButton">実行</button>
+        </div>
+      </form>
+    </dialog>
 
     <script src="/app.js"></script>
   </body>
