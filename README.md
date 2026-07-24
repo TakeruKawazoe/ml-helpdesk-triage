@@ -1,122 +1,147 @@
 # ML Helpdesk Triage
 
-業務問い合わせ・障害チケットの一次切り分けを支援する、教師あり機械学習アプリの開発プロジェクトです。
+業務問い合わせ・障害チケットの一次切り分けを支援する、教師あり機械学習アプリです。カテゴリ、優先度、推奨担当部署を予測し、信頼度が評価済み基準を下回る場合は「要確認（一次受付）」へ回します。
 
-## GitHubでの運用方針
+## 主な機能
 
-GitHubには、ソースコード、ダミーデータ、設計メモ、README、開発ログを載せます。
-学習済みモデル、評価レポート、Pythonキャッシュは再生成できるため、`.gitignore` で管理対象から外します。
-
-この方針により、採用担当者には実装内容と再現手順を見せつつ、生成物でリポジトリが重くならない構成にします。
-
-## 現在できていること
-
-- ダミーチケットCSVの作成
-- TF-IDFによるテキスト特徴量化
-- Logistic Regressionによる多クラス分類
-- 以下3タスクのベースライン評価
-  - 問い合わせカテゴリ分類
-  - 優先度分類
-  - 推奨担当部署分類
-- 評価レポート出力
-- 学習済みモデルの保存
-- 任意の問い合わせ文に対するCLI予測
-- ローカルWeb画面からの予測
-- Web画面での予測履歴保存
-- 予測結果に対する修正フィードバック保存
-- 修正フィードバックを利用した安全な自動再学習
-- Middle・Highの問い合わせをSlackへ担当者メンション付きで通知
+- TF-IDFと線形分類器による3タスク分類
+- 文字TF-IDF、単語+文字TF-IDF、Logistic Regression、LinearSVC、クラス重みの同一条件比較
+- 意味テンプレート単位の分割による類似文漏洩の防止
+- モデル選定に使わない固定未知文による最終評価
+- 信頼度に基づく自動振り分けと要確認の切り替え
+- 予測履歴と、人が確認した修正フィードバックの保存
+- Notionへの予測・修正結果の同期
+- Middle・HighのSlack担当者通知
+- 品質ゲートを通過したフィードバックだけを使う自動再学習
 
 ## データ
 
-- `data/tickets_dummy.csv`
-- 240件
-- 8カテゴリ x 30件
-- 実在する企業、顧客、社員、問い合わせ内容とは関係しない完全なダミーデータ
+| ファイル | 件数 | 用途 |
+|---|---:|---|
+| `data/tickets_dummy.csv` | 540 | 学習、モデル選定、信頼度基準の調整 |
+| `data/tickets_holdout.csv` | 81 | 採用モデル決定後の固定未知文評価 |
 
-データは以下のコマンドで再生成できます。
+対象は9カテゴリです。
+
+- 勤怠
+- 請求
+- 権限
+- システム障害
+- ネットワーク
+- アカウント
+- データ連携
+- 端末
+- その他・対象外
+
+空調、照明、備品などをITカテゴリへ無理に分類しないため、`その他・対象外`を設けています。現在は一次受付先を総務としています。
+
+すべて完全なダミーデータであり、実在する企業、顧客、社員、問い合わせとは関係しません。詳細は`data/dataset_design.md`を参照してください。
 
 ```bash
 python src/generate_dummy_data.py
 ```
 
-## ベースラインモデル
+## 学習とモデル比較
 
-`src/train_baseline.py` で以下を実行します。
-
-- 文字1〜4gramのTF-IDF
-- 多クラスLogistic Regression
-- stratified train/test split
-- Accuracy、Macro F1、混同行列、予測結果CSVの出力
-
-`scikit-learn` がない環境でも動かせるよう、TF-IDFとLogistic Regressionは `numpy` ベースで実装しています。
-
-## 学習方法
-
-プロジェクトフォルダへ移動してから実行します。
+必要パッケージを準備し、改善モデルを学習します。
 
 ```bash
-python src/train_baseline.py
+pip install -r requirements.txt
+python src/train_improved.py
 ```
 
-学習時の出力例です。
+学習処理は次の順で行います。
 
-```text
-category: accuracy=0.7344 macro_f1=0.7305 train=176 test=64
-priority: accuracy=1.0 macro_f1=1.0 high_recall=1.0 train=180 test=60
-department: accuracy=0.7541 macro_f1=0.72 train=179 test=61
-```
+1. 同じ意味テンプレートから作った言い換え文を同じグループに固定する
+2. グループ単位で開発、検証、信頼度調整に分割する
+3. 5系統7候補を検証データで比較する
+4. Macro F1を主指標として採用候補を決める
+5. 優先度が同点の場合はHighのRecallと正解Highへの確信度を優先する
+6. 信頼度調整データで自動振り分けの最低信頼度を計測する
+7. 採用決定後にだけ固定未知文を評価する
 
-## Web画面で使う方法
+### 比較候補
 
-学習済みモデルを作成したあと、以下を実行します。
+- 文字1〜4gram TF-IDF + Logistic Regression
+- 単語1〜2gramと文字1〜4gram TF-IDF + Logistic Regression
+- 上記2構成の`class_weight=balanced`
+- 単語+文字TF-IDF + LinearSVC + 確率校正
+- Highを重くした優先度用Logistic Regression
 
-```bash
-python src/web_app.py
-```
+### 現在の固定未知文評価
 
-ブラウザで以下を開きます。
+| target | 採用モデル | Accuracy | Macro F1 | High見逃し | 部署誤振り分け |
+|---|---|---:|---:|---:|---:|
+| category | hybrid LinearSVC | 1.0000 | 1.0000 | - | - |
+| priority | hybrid LinearSVC | 1.0000 | 1.0000 | 0 | - |
+| department | char Logistic Regression | 1.0000 | 1.0000 | - | 0 |
 
-```text
-http://127.0.0.1:8000
-```
+これは81件の合成固定未知文に対する結果であり、実務精度を保証しません。実データを取得した段階で、固定評価データを実データへ置き換えて再計測する必要があります。
 
-Web画面では、問い合わせ文、影響範囲、依頼者、経路を入力して、カテゴリ・優先度・担当部署を確認できます。
+学習量を各カテゴリ20件、40件、60件に変えた学習曲線も`reports/improved/learning_curve.csv`へ出力します。精度だけでなく学習時間と1件当たり推論時間も記録します。
 
-## Notion連携
+## 信頼度と要確認
 
-予測結果をNotionのデータベースへ自動登録し、修正フィードバックを同じ行へ反映できます。連携先データベースに不足している列は、初回同期時に自動で追加されます。
+信頼度基準は固定値を勘で設定せず、信頼度調整データ上で「自動振り分けした予測の正答率90%以上」を満たす範囲から計測します。
 
-NotionのDeveloper Portalで内部インテグレーションを作成し、以下の権限を有効にしてください。
+3タスクのうち1つでも基準未満なら、ラベル候補は表示したまま`要確認（一次受付）`とします。履歴、Notion、Slackにも状態と理由を残します。
 
-- Read content
-- Insert content
-- Update content
+現在の合成固定未知文では、自動振り分け対象の正答率は全タスクで100%でした。優先度は誤判定を抑えるため自動振り分け対象が約33%に限定され、残りは要確認になります。精度と自動化率のトレードオフを隠さない設計です。
 
-次に、連携先データベースのメニューからインテグレーションを追加します。トークンはソースコードやGitへ保存せず、Webアプリを起動するPowerShellで環境変数へ設定してください。
+## Web画面
 
-```powershell
-$env:NOTION_API_TOKEN="Notionのインテグレーショントークン"
-$env:NOTION_DATABASE_ID="3a5d3d7e828c80d59124c41c212013e9"
-python src/web_app.py
-```
-
-Windowsのユーザー環境変数へ上記2項目を保存済みの場合は、次のコマンドで起動できます。
+学習後、次のコマンドで起動します。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run_web_app.ps1
 ```
 
-データベースに複数のデータソースが存在する場合だけ、`NOTION_DATA_SOURCE_ID` も設定します。環境変数が未設定の場合はNotion連携を無効として明示し、予測とローカル履歴保存は継続します。APIエラーの場合もローカル履歴を保持し、画面と履歴に同期失敗を表示します。
+ブラウザで`http://127.0.0.1:8000`を開きます。
+
+Notion・Slackの連携設定がない環境では、次のコマンドでもローカル機能のみを起動できます。
+
+```bash
+python src/web_app.py
+```
+
+## 修正フィードバックと自動再学習
+
+修正フィードバックには、正解カテゴリ、正解優先度、正解担当部署、確認者ID、修正理由が必要です。予測のまま未確認の履歴は学習に混ぜません。
+
+再学習を開始する条件は次のとおりです。
+
+- 新規または更新フィードバックが20件以上
+- カテゴリ、優先度、担当部署の全ラベルが各2件以上
+- 確認者が2名以上
+- 全件に修正理由がある
+
+候補モデルはすぐ採用せず、固定評価データで現行モデルと比較します。
+
+- 3タスクのMacro F1が低下しない
+- 優先度HighのRecallが低下せず、見逃し件数が増えない
+- 担当部署の誤振り分け件数が増えない
+- 自動振り分け対象の正答率が90%以上
+- 自動振り分け対象が20%以上で、現行より15ポイントを超えて低下しない
+
+採用・却下の判定理由と指標は`reports/retraining/{実行日時}/decision.json`へ保存します。旧モデルは採用時に`models/archive/`へ退避します。現在の固定評価データは合成データであり、実データではないことも判定レポートへ記録します。
+
+## Notion連携
+
+Notionの内部インテグレーションにRead content、Insert content、Update contentを付与し、対象データベースへ接続します。認証情報はGitへ保存せず、実行環境の環境変数へ設定します。
+
+```text
+NOTION_API_TOKEN
+NOTION_DATABASE_ID
+```
+
+データベースに複数データソースがある場合だけ`NOTION_DATA_SOURCE_ID`も設定します。必要な列は初回同期時に追加されます。同期失敗時もローカル履歴と予測は残ります。
 
 - [Notion APIの認証設定](https://developers.notion.com/guides/get-started/authorization)
 - [Notion APIでページを作成する](https://developers.notion.com/reference/post-page)
 
 ## Slack通知
 
-予測優先度が`Middle`または`High`の場合、共通のSlackチャンネルへ、予測担当部署の担当者をメンションして通知します。通知には問い合わせ文、優先度、カテゴリ、担当部署、Notionリンクを含めます。`Low`は通知対象外です。
-
-Slack Appを作成し、Bot Token Scopeに`chat:write`を追加してワークスペースへインストールします。Botを通知先チャンネルへ招待したあと、次のWindowsユーザー環境変数を設定してください。
+予測優先度がMiddleまたはHighの場合、共通チャンネルへ担当者メンション付きで通知します。
 
 ```text
 SLACK_BOT_TOKEN
@@ -128,127 +153,38 @@ SLACK_MENTION_DEVELOPMENT
 SLACK_MENTION_INFRASTRUCTURE
 ```
 
-`SLACK_BOT_TOKEN`には`xoxb-`で始まるBot User OAuth Token、`SLACK_CHANNEL_ID`には共通通知チャンネルのID、`SLACK_MENTION_...`には各部署担当者のSlackメンバーIDを設定します。トークンをソースコード、README、Gitへ保存しないでください。
-
-環境変数という仕組み自体はWindows専用ではありません。別のPCでは同じ変数名をそのPCへ設定し、Dockerやクラウドでは実行環境のシークレット設定から同じ変数名を渡します。コードと認証情報を分離するため、実行環境ごとに認証情報の設定が必要です。
-
-環境変数がすべて未設定の場合はSlack通知を無効として予測を継続します。一部だけ設定されている場合やSlack APIでエラーが発生した場合も、予測・ローカル履歴・Notion登録は保持し、画面と履歴に通知失敗を表示します。
+トークンやメンバーIDはコードへ埋め込まず、各PC、Docker、クラウドのシークレット設定から同じ変数名で渡します。通知失敗時も予測、Notion登録、ローカル履歴は残ります。
 
 - [Slack Appの設定](https://docs.slack.dev/app-management/quickstart-app-settings/)
 - [chat.postMessage API](https://api.slack.com/methods/chat.postMessage)
 - [OAuthトークンの安全な管理](https://api.slack.com/docs/oauth-safety)
 
-## 履歴と修正フィードバック
-
-Web画面から予測すると、予測内容は `storage/prediction_feedback.csv` に保存されます。
-このファイルには、問い合わせ文、入力条件、予測カテゴリ、予測優先度、予測担当部署、修正後の正解ラベル、メモを保存します。
-
-予測結果の下に表示される「修正フィードバック」から、カテゴリ・優先度・担当部署の正解ラベルを登録できます。
-保存後は「予測履歴」に反映され、あとから誤分類例として見直せます。
-
-`storage/` はローカル実行時の履歴保存先のため、Git管理対象から除外しています。
-採用担当者には実装内容を見せつつ、個人の試行履歴や実行時データはリポジトリへ含めない方針です。
-
-### Web API
-
-- `POST /api/predict`: 問い合わせ文を予測し、予測履歴を作成する
-- `GET /api/history?limit=10`: 最新の予測履歴を取得する
-- `POST /api/feedback`: 予測IDに対して修正フィードバックを保存する
-- `GET /api/retraining`: 自動再学習の進行状況と直近の評価結果を取得する
-
-## フィードバックによる自動再学習
-
-カテゴリ、優先度、担当部署の正解ラベルがすべて保存されたフィードバックを、再学習用データとして利用します。未確認の予測結果やラベルが一部しかない履歴は学習へ混ぜません。
-
-新規または更新されたフィードバックが10件たまると、Webアプリがバックグラウンドで候補モデルを学習します。学習に約1分かかっても、予測画面は引き続き利用できます。
-
-候補モデルはすぐ本番へ反映せず、乱数シードを固定した既存ダミーデータのテスト部分で現行モデルと比較します。以下をすべて満たした場合だけ自動採用します。
-
-- カテゴリ、優先度、担当部署のMacro F1が現行モデルより低下しない
-- 優先度`High`のRecallが現行モデルより低下しない
-
-基準を満たさない候補は破棄し、現行モデルを維持します。採用時はモデル読込を一時的にロックし、3種類のモデルをまとめて切り替えます。旧モデルは`models/archive/`へ退避されます。
-
-再学習の状態と評価結果は以下へ保存されます。いずれもローカル実行データのためGit管理対象外です。
-
-- `storage/retraining_status.json`: 待機、学習中、採用、不採用、失敗の状態
-- `storage/retraining_state.json`: 処理済みフィードバックの識別情報
-- `reports/retraining/{実行日時}/metrics.json`: 現行モデルと候補モデルの比較結果
-
-10件に達するまでは画面に残り件数を表示し、再学習は実行しません。
-
 ## テスト
-
-履歴保存、修正フィードバック、Notion連携、Slack通知の回帰テストは以下で実行できます。
 
 ```bash
 python -m unittest discover -s tests
 ```
 
-## CLIで使う方法
-
-学習後、以下のようなコマンドで新しい問い合わせ文を分類できます。
+## CLI予測
 
 ```bash
-python src/predict.py --text "出勤打刻が全社で利用できず業務が止まっています" --impact-scope 全社 --requester-role 管理者 --channel Slack
+python src/predict.py --text "全社でシステムにログインできず、業務が停止しています。" --impact-scope 全社 --requester-role 管理者 --channel Slack --json
 ```
 
-出力例です。
+## 生成物
 
-```text
-予測結果
-- category: 勤怠 (0.5602)
-  - 勤怠: 0.5602
-  - 端末: 0.0963
-  - 権限: 0.0848
-- priority: High (0.8932)
-  - High: 0.8932
-  - Middle: 0.0727
-  - Low: 0.0341
-- department: 総務 (0.5699)
-  - 総務: 0.5699
-  - 情シス: 0.2103
-  - 開発: 0.0930
-```
+GitHubにはコード、ダミーデータ、設計、テストを保存します。学習済みモデル、評価レポート、予測履歴は再生成またはローカル実行で作られるため、`.gitignore`で除外しています。
 
-## 現在の評価結果
+- `models/improved/`: 採用モデルと信頼度基準
+- `reports/improved/model_comparison.csv`: 全候補比較
+- `reports/improved/summary.csv`: 固定未知文評価
+- `reports/improved/learning_curve.csv`: 学習曲線
+- `storage/prediction_feedback.csv`: 予測履歴と修正フィードバック
 
-| target | accuracy | macro_f1 | high_recall | train_count | test_count |
-|---|---:|---:|---:|---:|---:|
-| category | 0.7344 | 0.7305 | - | 176 | 64 |
-| priority | 1.0000 | 1.0000 | 1.0000 | 180 | 60 |
-| department | 0.7541 | 0.7200 | - | 179 | 61 |
+## 残る課題
 
-## レポート出力先
-
-以下は `python src/train_baseline.py` の実行時に生成されます。
-
-- `reports/baseline/summary.csv`
-- `reports/baseline/category_metrics.json`
-- `reports/baseline/category_confusion_matrix.csv`
-- `reports/baseline/category_predictions.csv`
-- `reports/baseline/priority_metrics.json`
-- `reports/baseline/priority_confusion_matrix.csv`
-- `reports/baseline/priority_predictions.csv`
-- `reports/baseline/department_metrics.json`
-- `reports/baseline/department_confusion_matrix.csv`
-- `reports/baseline/department_predictions.csv`
-
-## モデル出力先
-
-以下は `python src/train_baseline.py` の実行時に生成されます。
-
-- `models/baseline/category_metadata.json`
-- `models/baseline/category_arrays.npz`
-- `models/baseline/priority_metadata.json`
-- `models/baseline/priority_arrays.npz`
-- `models/baseline/department_metadata.json`
-- `models/baseline/department_arrays.npz`
-
-## 次に改善すること
-
-- カテゴリごとの表現ゆれをさらに増やす
-- 誤分類例を分析し、特徴量設計を改善する
-- 実利用者による修正フィードバックを増やし、評価用データも実データへ段階的に置き換える
-- 履歴画面にカテゴリ・優先度・担当部署の絞り込みを追加する
-- 小規模なデプロイ環境で第三者が触れる状態にする
+- 実利用者から許諾を得た匿名化データで固定評価セットを作る
+- 実データ上で信頼度基準を再計測する
+- 確認者IDを認証済みユーザーIDへ置き換える
+- 実データの分布変化とラベル偏りを定期監視する
+- 第三者が試せる小規模環境へデプロイする
