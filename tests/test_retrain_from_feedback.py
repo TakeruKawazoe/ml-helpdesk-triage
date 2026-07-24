@@ -28,6 +28,7 @@ FEEDBACK_FIELDS = [
     "note",
     "reviewer_id",
     "feedback_saved_at",
+    "deleted_at",
 ]
 
 
@@ -44,6 +45,7 @@ def feedback_row(prediction_id: str, saved_at: str = "2026-07-23T10:00:00+09:00"
         "note": "VPN障害として確認しました",
         "reviewer_id": "reviewer-01",
         "feedback_saved_at": saved_at,
+        "deleted_at": "",
     }
 
 
@@ -92,6 +94,16 @@ class RetrainFromFeedbackTest(unittest.TestCase):
         rows = retrain.load_complete_feedback()
 
         self.assertEqual([row["prediction_id"] for row in rows], ["complete"])
+
+    def test_load_complete_feedback_ignores_deleted_rows(self) -> None:
+        active = feedback_row("active")
+        deleted = feedback_row("deleted")
+        deleted["deleted_at"] = "2026-07-24T12:00:00+09:00"
+        self.write_feedback([active, deleted])
+
+        rows = retrain.load_complete_feedback()
+
+        self.assertEqual([row["prediction_id"] for row in rows], ["active"])
 
     def test_changed_feedback_becomes_pending_again(self) -> None:
         row = feedback_row("ticket-1")

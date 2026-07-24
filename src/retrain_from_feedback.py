@@ -60,6 +60,7 @@ REQUIRED_FEEDBACK_FIELDS = {
     "note",
     "reviewer_id",
     "feedback_saved_at",
+    "deleted_at",
 }
 
 
@@ -103,6 +104,7 @@ def load_complete_feedback(path: Path | None = None) -> list[dict[str, str]]:
         and row["corrected_priority"]
         and row["corrected_department"]
         and row["feedback_saved_at"]
+        and not row["deleted_at"]
     ]
     prediction_ids = [row["prediction_id"] for row in complete_rows]
     if len(prediction_ids) != len(set(prediction_ids)):
